@@ -1,0 +1,15 @@
+vendor/
+.tools/
+**/.venv/
+**/node_modules/
+**/dist/
+**/__pycache__/
+runs/
+data/qdrant*/
+data/cache/
+data/retrieval/
+data/hf/
+.git/
+**/.env
+**/.env.*
+agent/app/data/.cache/
