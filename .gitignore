@@ -17,4 +17,5 @@ data/hf/
 runs/
 *.log
 data/knowledge/
+data/retrieval/
 .pytest_cache/
