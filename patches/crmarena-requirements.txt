@@ -1,0 +1,16 @@
+sacrebleu==2.4.3
+rouge==1.0.1
+simple-salesforce==1.12.6
+pandas==2.2.2
+numpy==2.0.1
+python-dotenv
+tqdm
+zeep
+litellm>=1.84,!=1.82.7,!=1.82.8
+openai
+together
+datasets
+google-cloud-aiplatform
+pytest
+scikit-learn
+pyyaml

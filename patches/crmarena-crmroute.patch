@@ -1,0 +1,554 @@
+diff --git a/crm_sandbox/agents/chat_agent.py b/crm_sandbox/agents/chat_agent.py
+index 59c7a8a..5ece029 100644
+--- a/crm_sandbox/agents/chat_agent.py
++++ b/crm_sandbox/agents/chat_agent.py
+@@ -5,7 +5,7 @@ litellm.set_verbose = False
+ from typing import Dict, List
+ import time, traceback
+ from crm_sandbox.agents.prompts import SCHEMA_STRING, REACT_RULE_STRING, SYSTEM_METADATA, REACT_EXTERNAL_INTERACTIVE_PROMPT, REACT_INTERNAL_INTERACTIVE_PROMPT, REACT_INTERNAL_PROMPT, REACT_EXTERNAL_PROMPT, REACT_PRIVACY_AWARE_EXTERNAL_PROMPT, REACT_PRIVACY_AWARE_EXTERNAL_INTERACTIVE_PROMPT, ACT_PROMPT
+-from crm_sandbox.agents.utils import parse_wrapped_response, BEDROCK_MODELS_MAP, TOGETHER_MODELS_MAP, VERTEX_MODELS_MAP
++from crm_sandbox.agents.utils import parse_wrapped_response, BEDROCK_MODELS_MAP, TOGETHER_MODELS_MAP, VERTEX_MODELS_MAP, GEMINI_API_MODELS_MAP, gemini3_completion_kwargs
+ import together
+ 
+ 
+@@ -59,7 +59,8 @@ class ChatAgent:
+             self.model = TOGETHER_MODELS_MAP[self.model]["name"]
+         elif "vertex" in provider and self.model in VERTEX_MODELS_MAP:
+             self.model = VERTEX_MODELS_MAP[self.model]["name"]
+-            
++        elif provider == "gemini" and self.model in GEMINI_API_MODELS_MAP:
++            self.model = GEMINI_API_MODELS_MAP[self.model]["name"]
+         else:
+             pass
+         if self.model in ["o1-mini", "o1-preview", "o1-2024-12-17", "o3-mini-2025-01-31"]:
+@@ -113,7 +114,7 @@ class ChatAgent:
+         while current_agent_turn < self.max_turns:
+             # sleep for non-openai models
+             if self.provider != "openai":
+-                time.sleep(5)
++                time.sleep(float(os.getenv("CRMARENA_TURN_SLEEP", "5")))
+             info = {}
+             current_agent_turn += 1
+             # turn off thinking for gemini 2.5 flash
+@@ -124,7 +125,7 @@ class ChatAgent:
+             else:
+                 thinking = None
+             
+-            res = completion(
++            completion_kwargs = dict(
+                 messages=self.messages,
+                 model=self.model,
+                 temperature=0.0,
+@@ -134,6 +135,9 @@ class ChatAgent:
+                 # custom_llm_provider=self.provider,
+                 additional_drop_params=["temperature"] if self.original_model_name in ["o1-mini", "o1-preview", "o1-2024-12-17", "deepseek-r1", "o3-mini-2025-01-31"] else []
+             )
++            # Gemini 3.x: temperature 1.0, fixed thinking level, room for thinking tokens
++            completion_kwargs.update(gemini3_completion_kwargs(self.model))
++            res = completion(**completion_kwargs)
+ 
+             
+             
+diff --git a/crm_sandbox/agents/remote_agent.py b/crm_sandbox/agents/remote_agent.py
+new file mode 100644
+index 0000000..66bae7d
+--- /dev/null
++++ b/crm_sandbox/agents/remote_agent.py
+@@ -0,0 +1,149 @@
++"""Evaluate an agent served by `adk api_server` (or the agents-cli FastAPI app).
++
++The benchmark keeps its own environment, simulated user and graders. This adapter
++only forwards each user turn to the remote agent and hands the agent's reply back
++to the environment as a `respond` action, exactly like the ReAct baseline's final
++<respond> step. The remote agent gets the same task context (metadata) and the same
++customer-facing flag that the baseline receives through its system prompt.
++"""
++import os
++import time
++import uuid
++from typing import Any, Dict, List, Optional, Tuple
++
++import requests
++
++
++class RemoteAgent:
++    def __init__(
++        self,
++        base_url: str,
++        app_name: str,
++        org_type: str,
++        agent_type: str,
++        eval_mode: str = "default",
++        interactive: bool = False,
++        max_user_turns: int = 10,
++        timeout: float = 900.0,
++        user_id: str = "crmarena",
++    ):
++        assert agent_type in ["internal", "external"], "Invalid agent type"
++        self.base_url = base_url.rstrip("/")
++        self.app_name = app_name
++        self.org_type = org_type
++        self.agent_type = agent_type
++        self.eval_mode = eval_mode
++        self.interactive = interactive
++        self.max_user_turns = max_user_turns
++        self.timeout = timeout
++        self.user_id = user_id
++        self.messages: List[Dict[str, str]] = []
++        self.info: Dict[str, Any] = {}
++        self.http = requests.Session()
++        token = os.getenv("CRMROUTE_ID_TOKEN")  # Cloud Run: `gcloud auth print-identity-token`
++        if token:
++            self.http.headers["Authorization"] = f"Bearer {token}"
++
++    def _url(self, path: str) -> str:
++        return f"{self.base_url}{path}"
++
++    def _create_session(self, session_id: str, state: Dict[str, Any]) -> None:
++        res = self.http.post(
++            self._url(f"/apps/{self.app_name}/users/{self.user_id}/sessions"),
++            json={"session_id": session_id, "state": state},
++            timeout=60,
++        )
++        res.raise_for_status()
++
++    def _get_state(self, session_id: str) -> Dict[str, Any]:
++        res = self.http.get(
++            self._url(f"/apps/{self.app_name}/users/{self.user_id}/sessions/{session_id}"),
++            timeout=60,
++        )
++        res.raise_for_status()
++        return res.json().get("state", {})
++
++    def _run_turn(self, session_id: str, text: str) -> Tuple[str, List[Dict[str, Any]]]:
++        res = self.http.post(
++            self._url("/run"),
++            json={
++                "app_name": self.app_name,
++                "user_id": self.user_id,
++                "session_id": session_id,
++                "new_message": {"role": "user", "parts": [{"text": text}]},
++                "streaming": False,
++            },
++            timeout=self.timeout,
++        )
++        res.raise_for_status()
++        events = res.json()
++        return self._final_text(events), events
++
++    @staticmethod
++    def _final_text(events: List[Dict[str, Any]]) -> str:
++        # The workflow's last node writes its reply to state as crm_final_response.
++        for event in reversed(events):
++            delta = (event.get("actions") or {}).get("stateDelta") or {}
++            if isinstance(delta.get("crm_final_response"), str):
++                return delta["crm_final_response"]
++        for event in reversed(events):
++            for part in reversed((event.get("content") or {}).get("parts") or []):
++                if part.get("text") and not part.get("thought"):
++                    return part["text"]
++        return ""
++
++    @staticmethod
++    def _summarize(events: List[Dict[str, Any]]) -> Dict[str, Any]:
++        tool_calls, tool_errors, authors = 0, 0, []
++        for event in events:
++            authors.append(event.get("author"))
++            for part in (event.get("content") or {}).get("parts") or []:
++                if part.get("functionCall"):
++                    tool_calls += 1
++                response = part.get("functionResponse")
++                if response:
++                    body = response.get("response") or {}
++                    if body.get("isError") or body.get("error"):
++                        tool_errors += 1
++        return {"events": len(events), "tool_calls": tool_calls, "tool_errors": tool_errors, "authors": authors}
++
++    def act(self, env, index=None):
++        query, metadata = env.reset(task_index=index)
++        metadata = metadata or {}
++        session_id = f"crmarena-{self.org_type}-{index}-{uuid.uuid4().hex[:8]}"
++        self._create_session(
++            session_id,
++            {
++                "crm_org": self.org_type,
++                "crm_audience": "customer" if self.agent_type == "external" else "employee",
++                "crm_interactive": self.interactive,
++                "crm_task_context": metadata.get("required") or "",
++                "crm_extra_context": (metadata.get("optional") or "") if self.eval_mode == "aided" else "",
++            },
++        )
++        self.messages = []
++        self.info = {"session_id": session_id, "turns": []}
++        observation, reward, done, turns = query, 0, False, 0
++        # One reply per user message; the environment decides when the task ends.
++        while not done and turns <= self.max_user_turns:
++            turns += 1
++            start = time.time()
++            answer, events = self._run_turn(session_id, observation)
++            latency = time.time() - start
++            self.messages.append({"role": "user", "content": observation})
++            self.messages.append({"role": "assistant", "content": answer})
++            self.info["turns"].append({"latency_s": round(latency, 3), **self._summarize(events)})
++            observation, reward, done, info = env.step({"name": "respond", "content": answer})
++            if "end_reason" in info:
++                self.info["end_reason"] = info["end_reason"]
++        state = self._get_state(session_id)
++        usage = state.get("crm_usage") or {}
++        self.info["usage"] = usage
++        self.info["total_cost"] = usage.get("total_cost_usd", 0.0)
++        self.info["route"] = state.get("crm_route")
++        self.info["guard"] = state.get("crm_guard")
++        self.info["num_turns"] = (env.current_user_turn, turns)
++        return reward
++
++    def get_messages(self) -> List[Dict[str, str]]:
++        return self.messages
+diff --git a/crm_sandbox/agents/utils.py b/crm_sandbox/agents/utils.py
+index e1b972b..03506ac 100644
+--- a/crm_sandbox/agents/utils.py
++++ b/crm_sandbox/agents/utils.py
+@@ -1,3 +1,4 @@
++import os
+ import re
+ import string
+ from collections import Counter
+@@ -89,9 +90,44 @@ VERTEX_MODELS_MAP = {
+   },
+   "gemini-2.0-flash-001":{
+         "name": "vertex_ai/gemini-2.0-flash-001"
++  },
++  "gemini-3.8-flash": {
++        "name": "vertex_ai/gemini-3.8-flash"
++  },
++  "gemini-3.1-flash-lite": {
++        "name": "vertex_ai/gemini-3.1-flash-lite"
+   }
+ }
+ 
++# Same models through the Gemini API (AI Studio); used with --llm_provider gemini.
++GEMINI_API_MODELS_MAP = {
++  "gemini-3.8-flash": {
++        "name": "gemini/gemini-3.8-flash"
++  },
++  "gemini-3.1-flash-lite": {
++        "name": "gemini/gemini-3.1-flash-lite"
++  }
++}
++
++GEMINI3_MODELS = {"gemini-3.8-flash", "gemini-3.1-flash-lite"}
++
++
++def gemini3_completion_kwargs(model_name):
++    """Generation settings shared by every system that calls a Gemini 3.x model.
++
++    Google recommends temperature 1.0 for Gemini 3 (lower values can loop), thinking
++    is fixed at one level everywhere, and the output budget leaves room for
++    thinking tokens. Override with CRMARENA_THINKING_LEVEL / CRMARENA_MAX_TOKENS.
++    """
++    name = model_name.split("/")[-1]
++    if name not in GEMINI3_MODELS:
++        return {}
++    return {
++        "temperature": 1.0,
++        "reasoning_effort": os.getenv("CRMARENA_THINKING_LEVEL", "low"),
++        "max_tokens": int(os.getenv("CRMARENA_MAX_TOKENS", "8192")),
++    }
++
+ ### Utils ###
+ def parse_wrapped_response(reg_exp, text_phrase):
+     match = re.search(reg_exp, text_phrase, re.DOTALL)
+diff --git a/crm_sandbox/env/env.py b/crm_sandbox/env/env.py
+index 41d331d..fda8c14 100644
+--- a/crm_sandbox/env/env.py
++++ b/crm_sandbox/env/env.py
+@@ -1,20 +1,36 @@
++import os
+ import random
++import re
+ from typing import Any, Callable, Dict, List, Type, Optional, Set, Union, Tuple
+ from crm_sandbox.env.connect_sandbox import SalesforceConnector
+ from crm_sandbox.env.users import LLMUserSimulationEnv
+ from concurrent.futures import ThreadPoolExecutor
+-from crm_sandbox.agents.utils import get_all_metrics
++from crm_sandbox.agents.utils import get_all_metrics, gemini3_completion_kwargs
+ import litellm
+ import json
+ 
++DEFAULT_JUDGE_MODEL = os.getenv("CRMARENA_JUDGE_MODEL", "gpt-4o-2024-08-06")
++DEFAULT_JUDGE_PROVIDER = os.getenv("CRMARENA_JUDGE_PROVIDER", "openai")
++DEFAULT_USER_MODEL = os.getenv("CRMARENA_USER_MODEL", "gpt-4o-2024-08-06")
++DEFAULT_USER_PROVIDER = os.getenv("CRMARENA_USER_PROVIDER", "openai")
++
++
++def _strip_code_fences(text: str) -> str:
++    """Remove a surrounding ```json ... ``` fence, which some judge models add."""
++    match = re.match(r"^\s*```(?:json|JSON)?\s*(.*?)\s*```\s*$", text, re.DOTALL)
++    return match.group(1) if match else text
++
++
+ class ChatEnv(object):
+     def __init__(
+         self,
+         tasks: List[Dict],
+         task_index: Optional[int] = None,
+-        user_model: str = "gpt-4o-2024-08-06",
+-        user_provider: Optional[str] = "openai",
++        user_model: str = DEFAULT_USER_MODEL,
++        user_provider: Optional[str] = DEFAULT_USER_PROVIDER,
+         org_type: str = "b2b",
++        judge_model: str = DEFAULT_JUDGE_MODEL,
++        judge_provider: Optional[str] = DEFAULT_JUDGE_PROVIDER,
+     ) -> None:
+         super().__init__()
+         self.tasks = tasks
+@@ -27,7 +43,7 @@ class ChatEnv(object):
+         self.sf_connector = SalesforceConnector(org_type=org_type)
+         self.max_user_turns = 1  # dummy
+         self.current_user_turn = 0 # dummy
+-        self.evaluator = Evaluator(model=user_model, provider=user_provider)
++        self.evaluator = Evaluator(model=judge_model, provider=judge_provider)
+         
+         
+     def reset(self, task_index: int = 0):
+@@ -184,16 +200,18 @@ class InteractiveChatEnv(ChatEnv):
+         tasks: List[Dict],
+         max_user_turns: int = 10,
+         task_index: Optional[int] = None,
+-        user_model: str = "gpt-4o-2024-08-06",
+-        user_provider: Optional[str] = "openai",
++        user_model: str = DEFAULT_USER_MODEL,
++        user_provider: Optional[str] = DEFAULT_USER_PROVIDER,
+         org_type: str = "b2b",
++        judge_model: str = DEFAULT_JUDGE_MODEL,
++        judge_provider: Optional[str] = DEFAULT_JUDGE_PROVIDER,
+     ) -> None:
+     
+-        super().__init__(tasks=tasks, task_index=task_index, org_type=org_type)
++        super().__init__(tasks=tasks, task_index=task_index, org_type=org_type,
++                         judge_model=judge_model, judge_provider=judge_provider)
+         self.user = LLMUserSimulationEnv(model=user_model, provider=user_provider)
+         self.max_user_turns = max_user_turns
+         self.current_user_turn = 0
+-        self.evaluator = Evaluator(model=user_model, provider=user_provider)
+ 
+     def step(self, action):
+         self.actions.append(action)
+@@ -395,6 +413,14 @@ class Evaluator(object):
+         ).strip()
+         
+         
++    def _complete(self, messages):
++        res = litellm.completion(
++            model=self.model, custom_llm_provider=self.provider, messages=messages,
++            **gemini3_completion_kwargs(self.model)
++        )
++        self.total_cost += res._hidden_params.get("response_cost") or 0.0
++        return res
++
+     def parse_answers(self, model_output: str, task_name: str) -> str:
+         # TODO: change system prompt based on task name
+         if task_name == "best_region_identification":
+@@ -413,12 +439,10 @@ class Evaluator(object):
+             {"role": "system", "content": system_prompt},
+             {"role": "user", "content": model_output}
+         ]
+-        res = litellm.completion(
+-            model=self.model, custom_llm_provider=self.provider, messages=messages
+-        )
++        res = self._complete(messages)
+         extracted_answers = res.choices[0].message
+         try:
+-            parsed_answers = json.loads(extracted_answers.content)["extracted_answers"]
++            parsed_answers = json.loads(_strip_code_fences(extracted_answers.content))["extracted_answers"]
+         except Exception as e:
+             # if cannot directly parse use some heuristic methods. 
+             print(f"Failed to parse JSON: {extracted_answers.content}. Error: {e}. Using heuristics.")
+@@ -513,9 +537,7 @@ class Evaluator(object):
+             {"role": "system", "content": system_prompt},
+             {"role": "user", "content": model_output}
+         ]
+-        res = litellm.completion(
+-            model=self.model, custom_llm_provider=self.provider, messages=messages
+-        )
++        res = self._complete(messages)
+         
+         if "yes" in res.choices[0].message.content.strip().lower() :
+             return 1
+diff --git a/crm_sandbox/env/users.py b/crm_sandbox/env/users.py
+index cbcb371..be82abf 100644
+--- a/crm_sandbox/env/users.py
++++ b/crm_sandbox/env/users.py
+@@ -1,5 +1,6 @@
+ from typing import Optional, List, Dict, Any, Union
+ from litellm import completion
++from crm_sandbox.agents.utils import gemini3_completion_kwargs
+ 
+ class LLMUserSimulationEnv(object):
+     def __init__(self, model: str, provider: str) -> None:
+@@ -12,11 +13,12 @@ class LLMUserSimulationEnv(object):
+ 
+     def generate_next_message(self, messages: List[Dict[str, Any]]) -> str:
+         res = completion(
+-            model=self.model, custom_llm_provider=self.provider, messages=messages
++            model=self.model, custom_llm_provider=self.provider, messages=messages,
++            **gemini3_completion_kwargs(self.model)
+         )
+         message = res.choices[0].message
+         self.messages.append(message.model_dump())
+-        self.total_cost = res._hidden_params["response_cost"]
++        self.total_cost += res._hidden_params.get("response_cost") or 0.0
+         return message.content
+ 
+     def build_system_prompt(self, instruction: Optional[str], persona: Optional[str]) -> str:
+diff --git a/run_tasks.py b/run_tasks.py
+index a5616fe..5cd3d61 100644
+--- a/run_tasks.py
++++ b/run_tasks.py
+@@ -1,6 +1,7 @@
+ from dotenv import load_dotenv
+ import json, os
+ from crm_sandbox.agents import ChatAgent, ToolCallAgent
++from crm_sandbox.agents.remote_agent import RemoteAgent
+ from crm_sandbox.agents.utils import BEDROCK_MODELS_MAP, TOGETHER_MODELS_MAP, VERTEX_MODELS_MAP
+ from crm_sandbox.data.assets import TASKS_ORIGINAL, SCHEMA_ORIGINAL, TASKS_B2B, TASKS_B2B_INTERACTIVE, TASKS_B2C, TASKS_B2C_INTERACTIVE, B2B_SCHEMA, B2C_SCHEMA, EXTERNAL_FACING_TASKS
+ from crm_sandbox.env.env import ChatEnv, ToolEnv, InteractiveChatEnv
+@@ -13,7 +14,8 @@ import time
+ def run():
+     if not os.path.exists(args.log_dir):
+         os.makedirs(args.log_dir)
+-    ckpt_path = f"{args.log_dir}/results_{args.model}_{args.agent_strategy}_{args.task_category}.json"
++    mode_suffix = "_interactive" if args.interactive else ""
++    ckpt_path = f"{args.log_dir}/results_{args.model}_{args.agent_strategy}_{args.task_category}_{args.org_type}{mode_suffix}.json"
+     if args.org_type == "b2b":
+         TASKS_NATURAL = TASKS_B2B_INTERACTIVE if args.interactive else TASKS_B2B
+         SCHEMA = B2B_SCHEMA
+@@ -31,6 +33,13 @@ def run():
+         selected_tasks = [task for task in TASKS_NATURAL if task["task"] in args.task_category.split(",")]
+     else:
+         selected_tasks = [task for task in TASKS_NATURAL if task["task"] == args.task_category]
++
++    if args.task_ids_file:
++        # fixed task lists (dev.json / test.json) written by scripts/make_splits.py
++        with open(args.task_ids_file) as f:
++            id_lists = json.load(f)
++        wanted = set(id_lists.get(args.org_type, {}).get("multi_turn" if args.interactive else "single_turn", []))
++        selected_tasks = [task for task in selected_tasks if task["idx"] in wanted]
+         
+     # Load checkpoint if it exists
+     completed_tasks = {}
+@@ -43,11 +52,17 @@ def run():
+             os.remove(ckpt_path)
+             
+     print(f"Loaded {len(selected_tasks)} tasks")
++    if args.dry_run or not selected_tasks:
++        from collections import Counter
++        print("task types:", dict(Counter(task["task"] for task in selected_tasks)))
++        print("task ids:", [task["idx"] for task in selected_tasks])
++        return
+     start_time = datetime.now()
+     print(f"Starting evaluation at {start_time}")
+     selected_tasks = {t['idx']: t for t in selected_tasks}
+     
+-    if args.agent_strategy in ["act", "react"]:
++    env_models = dict(judge_model=args.judge_model, judge_provider=args.judge_provider)
++    if args.agent_strategy in ["act", "react", "remote"]:
+         if args.interactive:
+             if args.agent_strategy == "act":
+                 raise ValueError(
+@@ -56,9 +71,10 @@ def run():
+                 )
+             # This implies agent_strategy is "react" if interactive is True
+             
+-            env = InteractiveChatEnv(tasks=selected_tasks, max_user_turns=args.max_user_turns, org_type=args.org_type)
++            env = InteractiveChatEnv(tasks=selected_tasks, max_user_turns=args.max_user_turns, org_type=args.org_type,
++                                     user_model=args.user_model, user_provider=args.user_provider, **env_models)
+         else: # Not interactive, both 'act' and 'react' are fine
+-            env = ChatEnv(tasks=selected_tasks, org_type=args.org_type)
++            env = ChatEnv(tasks=selected_tasks, org_type=args.org_type, **env_models)
+     elif args.agent_strategy == "tool_call":
+         if args.interactive:
+             raise NotImplementedError(
+@@ -93,7 +109,17 @@ def run():
+             agent_type = "external"
+         else:
+             agent_type = "internal"
+-        if args.agent_strategy in ["react"]:
++        if args.agent_strategy == "remote":
++            agent = RemoteAgent(
++                base_url=args.remote_url,
++                app_name=args.remote_app,
++                org_type=args.org_type,
++                agent_type=agent_type,
++                eval_mode=args.agent_eval_mode,
++                interactive=args.interactive,
++                max_user_turns=args.max_user_turns,
++            )
++        elif args.agent_strategy in ["react"]:
+             agent = ChatAgent(
+                 model=args.model,
+                 schema_obj=SCHEMA,
+@@ -117,6 +143,8 @@ def run():
+                 provider=args.llm_provider
+             )
+         print(f"Running task {idx}")
++        judge_cost_before = env.evaluator.total_cost
++        user_cost_before = env.user.total_cost if hasattr(env, "user") else 0.0
+         try:
+             reward = agent.act(
+                 env,
+@@ -125,6 +153,8 @@ def run():
+             result = {
+                 "task_id": idx,
+                 "task_type": task["task"],
++                "org_type": args.org_type,
++                "interactive": args.interactive,
+                 "gt_answer": task["answer"],
+                 "reward": reward,
+                 "agent_info": agent.info,
+@@ -143,6 +173,8 @@ def run():
+                 },
+                 "traj": agent.get_messages(),
+             }
++        result["judge_cost"] = env.evaluator.total_cost - judge_cost_before
++        result["user_sim_cost"] = (env.user.total_cost if hasattr(env, "user") else 0.0) - user_cost_before
+         print(
+             "✅" if result["reward"] == 1 else "❌",
+             f"task_id={idx}"
+@@ -172,7 +204,7 @@ if __name__ == "__main__":
+         "--agent_strategy",
+         type=str,
+         default="react",
+-        choices=["tool_call", "act", "react", "tool_call_flex"],
++        choices=["tool_call", "act", "react", "tool_call_flex", "remote"],
+     )
+     parser.add_argument(
+         "--agent_eval_mode",
+@@ -184,7 +216,7 @@ if __name__ == "__main__":
+         "--llm_provider",
+         type=str,
+         default="bedrock",
+-        choices=["bedrock", "together_ai", "openai", "vertex_ai"]
++        choices=["bedrock", "together_ai", "openai", "vertex_ai", "gemini"]
+     )
+     parser.add_argument(
+         "--task_category",
+@@ -235,6 +267,18 @@ if __name__ == "__main__":
+         help="Whether to use a privacy-aware prompt. Accepts 'true' or 'false'. (default: %(default)s)"
+     )
+     parser.add_argument("--log_dir", type=str, default="logs")
++    parser.add_argument("--task_ids_file", type=str, default=None,
++                        help="JSON of fixed task ids per org and mode (scripts/make_splits.py)")
++    parser.add_argument("--judge_model", type=str, default=os.getenv("CRMARENA_JUDGE_MODEL", "gpt-4o-2024-08-06"),
++                        help="Model that extracts answers and judges refusals")
++    parser.add_argument("--judge_provider", type=str, default=os.getenv("CRMARENA_JUDGE_PROVIDER", "openai"))
++    parser.add_argument("--user_model", type=str, default=os.getenv("CRMARENA_USER_MODEL", "gpt-4o-2024-08-06"),
++                        help="Model that plays the user in --interactive runs")
++    parser.add_argument("--user_provider", type=str, default=os.getenv("CRMARENA_USER_PROVIDER", "openai"))
++    parser.add_argument("--remote_url", type=str, default=os.getenv("CRMROUTE_URL", "http://127.0.0.1:8000"),
++                        help="Base URL of the ADK server for --agent_strategy remote")
++    parser.add_argument("--remote_app", type=str, default=os.getenv("CRMROUTE_APP", "app"))
++    parser.add_argument("--dry_run", action="store_true", help="Print the selected tasks and exit")
+     args = parser.parse_args()
+     print(args)
+ 
