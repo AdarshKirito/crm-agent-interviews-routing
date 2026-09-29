@@ -1,0 +1,36 @@
+{
+  "name": "crmroute-mcp-salesforce",
+  "version": "0.1.0",
+  "description": "Read-only Salesforce MCP server (5 tools) for the crmroute agent",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "crmroute-mcp-salesforce": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "start:http": "node dist/index.js --http",
+    "dev": "tsx src/index.ts --http",
+    "test": "tsx --test test/*.test.ts",
+    "smoke": "tsx test/smoke.ts",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.0",
+    "@modelcontextprotocol/server": "^2.1.0",
+    "jsforce": "^3.10.26",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.1.0",
+    "@types/node": "^24.19.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
