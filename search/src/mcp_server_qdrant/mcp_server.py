@@ -3,6 +3,7 @@ import logging
 from typing import Annotated, Any, Optional
 
 from fastmcp import Context, FastMCP
+from fastmcp.server.dependencies import get_http_headers
 from pydantic import Field
 from qdrant_client import models
 
@@ -11,6 +12,7 @@ from mcp_server_qdrant.common.func_tools import make_partial_function
 from mcp_server_qdrant.common.wrap_filters import wrap_filters
 from mcp_server_qdrant.embeddings.base import EmbeddingProvider
 from mcp_server_qdrant.embeddings.factory import create_embedding_provider
+from mcp_server_qdrant.hybrid import HybridKnowledgeIndex, HybridSettings
 from mcp_server_qdrant.qdrant import ArbitraryFilter, Entry, Metadata, QdrantConnector
 from mcp_server_qdrant.settings import (
     EmbeddingProviderSettings,
@@ -34,12 +36,14 @@ class QdrantMCPServer(FastMCP):
         qdrant_settings: QdrantSettings,
         embedding_provider_settings: Optional[EmbeddingProviderSettings] = None,
         embedding_provider: Optional[EmbeddingProvider] = None,
+        hybrid_settings: Optional[HybridSettings] = None,
         name: str = "mcp-server-qdrant",
         instructions: str | None = None,
         **settings: Any,
     ):
         self.tool_settings = tool_settings
         self.qdrant_settings = qdrant_settings
+        self.hybrid_settings = hybrid_settings or HybridSettings()
 
         if embedding_provider_settings and embedding_provider:
             raise ValueError(
@@ -72,6 +76,10 @@ class QdrantMCPServer(FastMCP):
             self.embedding_provider,
             qdrant_settings.local_path,
             make_indexes(qdrant_settings.filterable_fields_dict()),
+        )
+        # crmroute: hybrid knowledge search shares the connector's Qdrant client
+        self.hybrid_index = HybridKnowledgeIndex(
+            self.qdrant_connector._client, self.hybrid_settings
         )
 
         super().__init__(name=name, instructions=instructions, **settings)
@@ -163,6 +171,33 @@ class QdrantMCPServer(FastMCP):
             for entry in entries:
                 content.append(self.format_entry(entry))
             return content
+
+        async def search_knowledge(
+            ctx: Context,
+            query: Annotated[str, Field(description="What to look for, in plain words")],
+            top_k: Annotated[
+                int, Field(description="Number of articles to return", ge=1, le=20)
+            ] = 5,
+        ) -> str:
+            """Hybrid search over the org's knowledge articles."""
+            # The org comes from the x-crm-org header (HTTP) or CRM_DEFAULT_ORG (stdio).
+            org = get_http_headers(include_all=True).get("x-crm-org")
+            collection = self.hybrid_index.collection_for(org)
+            hits = await self.hybrid_index.search(collection, query, top_k=top_k)
+            await ctx.debug(f"search_knowledge {collection}: {len(hits)} hits")
+            return json.dumps(
+                {"returned": len(hits), "articles": [self.hybrid_index.to_result(h) for h in hits]}
+            )
+
+        if self.hybrid_settings.enabled:
+            self.tool(
+                search_knowledge,
+                name="search_knowledge",
+                description=self.hybrid_settings.tool_description,
+                annotations={"readOnlyHint": True, "idempotentHint": True},
+            )
+            if self.hybrid_settings.only:
+                return
 
         find_foo = find
         store_foo = store
