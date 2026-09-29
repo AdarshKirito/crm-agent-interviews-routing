@@ -1,0 +1,146 @@
+{
+ "request+context": {
+  "n": 194,
+  "accuracy": 0.9381443298969072,
+  "per_type": {
+   "activity_priority": 1.0,
+   "best_region_identification": 1.0,
+   "case_routing": 1.0,
+   "confidential_company_knowledge": 0.5714285714285714,
+   "conversion_rate_comprehension": 1.0,
+   "handle_time": 1.0,
+   "internal_operation_data": 0.5714285714285714,
+   "invalid_config": 1.0,
+   "knowledge_qa": 1.0,
+   "lead_qualification": 1.0,
+   "lead_routing": 1.0,
+   "monthly_trend_analysis": 1.0,
+   "named_entity_disambiguation": 1.0,
+   "policy_violation_identification": 1.0,
+   "private_customer_information": 1.0,
+   "quote_approval": 1.0,
+   "sales_amount_understanding": 1.0,
+   "sales_cycle_understanding": 1.0,
+   "sales_insight_mining": 1.0,
+   "top_issue_identification": 1.0,
+   "transfer_count": 1.0,
+   "wrong_stage_rectification": 1.0
+  },
+  "top_confusions": [
+   [
+    "confidential_company_knowledge",
+    "knowledge_qa",
+    2
+   ],
+   [
+    "internal_operation_data",
+    "top_issue_identification",
+    2
+   ],
+   [
+    "internal_operation_data",
+    "wrong_stage_rectification",
+    2
+   ],
+   [
+    "confidential_company_knowledge",
+    "monthly_trend_analysis",
+    2
+   ],
+   [
+    "confidential_company_knowledge",
+    "activity_priority",
+    1
+   ],
+   [
+    "confidential_company_knowledge",
+    "internal_operation_data",
+    1
+   ],
+   [
+    "internal_operation_data",
+    "sales_cycle_understanding",
+    1
+   ],
+   [
+    "internal_operation_data",
+    "sales_insight_mining",
+    1
+   ]
+  ],
+  "low_confidence_share": 0.020618556701030927,
+  "accuracy_when_low_confidence": 0.25
+ },
+ "context_only": {
+  "n": 194,
+  "accuracy": 0.845360824742268,
+  "per_type": {
+   "activity_priority": 1.0,
+   "best_region_identification": 1.0,
+   "case_routing": 1.0,
+   "confidential_company_knowledge": 0.5714285714285714,
+   "conversion_rate_comprehension": 1.0,
+   "handle_time": 1.0,
+   "internal_operation_data": 0.5714285714285714,
+   "invalid_config": 1.0,
+   "knowledge_qa": 1.0,
+   "lead_qualification": 1.0,
+   "lead_routing": 1.0,
+   "monthly_trend_analysis": 0.0,
+   "named_entity_disambiguation": 0.75,
+   "policy_violation_identification": 1.0,
+   "private_customer_information": 1.0,
+   "quote_approval": 1.0,
+   "sales_amount_understanding": 1.0,
+   "sales_cycle_understanding": 1.0,
+   "sales_insight_mining": 1.0,
+   "top_issue_identification": 0.0,
+   "transfer_count": 1.0,
+   "wrong_stage_rectification": 1.0
+  },
+  "top_confusions": [
+   [
+    "monthly_trend_analysis",
+    "best_region_identification",
+    8
+   ],
+   [
+    "top_issue_identification",
+    "best_region_identification",
+    8
+   ],
+   [
+    "confidential_company_knowledge",
+    "knowledge_qa",
+    2
+   ],
+   [
+    "internal_operation_data",
+    "top_issue_identification",
+    2
+   ],
+   [
+    "internal_operation_data",
+    "wrong_stage_rectification",
+    2
+   ],
+   [
+    "named_entity_disambiguation",
+    "best_region_identification",
+    2
+   ],
+   [
+    "confidential_company_knowledge",
+    "monthly_trend_analysis",
+    2
+   ],
+   [
+    "confidential_company_knowledge",
+    "activity_priority",
+    1
+   ]
+  ],
+  "low_confidence_share": 0.020618556701030927,
+  "accuracy_when_low_confidence": 0.25
+ }
+}

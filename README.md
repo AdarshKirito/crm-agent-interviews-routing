@@ -32,6 +32,17 @@ What this shows:
 
 Reproduce with `scripts/build_retrieval_set.py`, then `scripts/eval_retrieval.py --sosl-url http://127.0.0.1:3333/mcp`.
 
+### Task-type router: accuracy on the 194 test requests (`results/router_test.json`)
+
+The router takes a similarity-weighted vote over the 15 nearest of 1,760 labelled example requests. The examples come only from non-test tasks and are embedded with bge-small; there are no LLM calls.
+
+| input | accuracy |
+|---|---|
+| request + task context | **93.8%** (every error is a confidentiality request, which has no task context) |
+| task context only (worst case: a vague first message in multi-turn) | 84.5% |
+
+The router's label is only used to pick a model and to shape the prompt. Refusals never depend on it: the guard decides them from the request text.
+
 ### Published baselines, recomputed from CRMArena's released B2B single-turn runs (`results/published_b2b_single_turn.md`)
 
 | model | business tasks success [95% CI] (n=1880) | confidentiality refusal rate (n=60) | cost/task |

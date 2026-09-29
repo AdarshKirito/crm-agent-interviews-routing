@@ -19,4 +19,6 @@ runs/
 .adk/
 data/knowledge/
 data/retrieval/
+data/router_eval_test.jsonl
+agent/app/data/.cache/
 .pytest_cache/

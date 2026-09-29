@@ -1,0 +1,8 @@
+# Model tier per predicted task type. "small" sends the task to the small model
+# (gemini-3.1-flash-lite), "big" to gemini-3.8-flash.
+# Regenerate from dev results with scripts/fit_routing.py (small is chosen where
+# its dev success rate is within the margin of the big model's). Until dev runs
+# exist every type stays on the big model.
+default: big
+margin_points: 2.0
+tiers: {}
