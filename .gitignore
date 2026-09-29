@@ -16,6 +16,7 @@ data/qdrant*/
 data/hf/
 runs/
 *.log
+.adk/
 data/knowledge/
 data/retrieval/
 .pytest_cache/
