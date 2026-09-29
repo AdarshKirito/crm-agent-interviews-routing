@@ -1,0 +1,103 @@
+# Sensitive-data map for customer-facing sessions (audience = customer).
+# STARTER VERSION: built from the CRMArena-Pro schema and the dev split. Replace or
+# extend it with the never-share list from the stakeholder interviews
+# (Object.Field -> class). Classes:
+#   pii          personal data about a person
+#   internal_ops internal operational / sales data
+#   confidential confidential company knowledge
+# Employees (audience = employee) are not restricted by this file.
+
+# Objects a customer-facing session may query at all.
+customer_allowed_objects:
+  - Knowledge__kav
+  - Product2
+  - ProductCategory
+  - ProductCategoryProduct
+  - Pricebook2
+  - PricebookEntry
+  - Issue__c
+  - Order
+  - OrderItem
+  - Contact
+  - Account
+  - Case
+
+# Objects that hold one customer's own records: a query or lookup must be tied to
+# the logged-in customer (their contact Id, or ids found from their own records).
+customer_scoped_objects:
+  - Contact
+  - Account
+  - Order
+  - OrderItem
+  - Case
+
+# Relationship names used in SOQL paths, mapped to the object they point at.
+relationships:
+  Owner: User
+  CreatedBy: User
+  LastModifiedBy: User
+  Account: Account
+  Contact: Contact
+  Order: Order
+  Product2: Product2
+  Pricebook2: Pricebook2
+  PricebookEntry: PricebookEntry
+  Opportunity: Opportunity
+  Quote: Quote
+  Contract: Contract
+  Lead: Lead
+
+objects:
+  User: internal_ops
+  EmailMessage: internal_ops
+  LiveChatTranscript: internal_ops
+  CaseHistory__c: internal_ops
+  Opportunity: internal_ops
+  OpportunityLineItem: internal_ops
+  Quote: internal_ops
+  QuoteLineItem: internal_ops
+  Contract: internal_ops
+  VoiceCallTranscript__c: internal_ops
+  Task: internal_ops
+  Event: internal_ops
+  Territory2: internal_ops
+  UserTerritory2Association: internal_ops
+  Lead: internal_ops
+
+fields:
+  Contact.Email: pii
+  Contact.Phone: pii
+  Contact.MobilePhone: pii
+  Contact.MailingStreet: pii
+  Contact.MailingCity: pii
+  Contact.MailingState: pii
+  Contact.MailingPostalCode: pii
+  Contact.MailingAddress: pii
+  Contact.Birthdate: pii
+  Account.Phone: pii
+  Account.BillingStreet: pii
+  Account.BillingCity: pii
+  Account.BillingState: pii
+  Account.ShippingStreet: pii
+  Account.ShippingCity: pii
+  Account.ShippingState: pii
+  Account.ShippingPostalCode: pii
+  Lead.Email: pii
+  Lead.Phone: pii
+  Case.OwnerId: internal_ops
+  Case.IssueId__c: internal_ops
+
+# Knowledge articles that are internal. Matched case-insensitively against titles.
+confidential_article_titles:
+  - "^Competitor:"
+  - "Volume-Based Discounts"
+  - "Mandatory Bundles"
+  - "Competing Offers"
+  - "Installation Timeline Policy"
+
+# Phrases in a customer's request that point at a class. These are signals for the
+# policy classifier, not decisions on their own.
+request_terms:
+  pii: [email, e-mail, phone number, address, city, state is recorded, registered address, date of birth, "'s name", orders for, bought by, purchased by, order for]
+  internal_ops: [handle time, transfer count, conversion rate, sales cycle, sales amount, which agent, most frequent issue, most frequent problem, lead qualified, qualified based on, 'Budget', opportunity's stage, 'Not Started', quote comply, quote adhere, against company policy, sentiment, subtopic]
+  confidential: [competitor, competitive advantage, weakness, strength of, discount tier, mandatory bundle, must be bundled, competing offers, pricing strategy, negotiation]
