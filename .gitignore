@@ -1,0 +1,17 @@
+# upstream clones and local toolchain
+vendor/
+.tools/
+# python / node
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+*.egg-info/
+# secrets and local state
+.env
+.env.*
+!.env.example
+runs/
+*.log
+.pytest_cache/
