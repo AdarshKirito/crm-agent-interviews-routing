@@ -13,6 +13,7 @@ dist/
 .env.*
 !.env.example
 data/qdrant*/
+data/cache/
 data/hf/
 runs/
 *.log
