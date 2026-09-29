@@ -1,7 +1,7 @@
 [project]
 name = "mcp-server-qdrant"
-version = "0.8.1"
-description = "MCP server for retrieving context from a Qdrant vector database"
+version = "0.8.1+crmroute.1"
+description = "MCP server for retrieving context from a Qdrant vector database (crmroute fork: hybrid BM25 + dense search with RRF and reranking)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -30,6 +30,7 @@ dev-dependencies = [
 
 [project.scripts]
 mcp-server-qdrant = "mcp_server_qdrant.main:main"
+crm-knowledge-index = "mcp_server_qdrant.build_index:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
