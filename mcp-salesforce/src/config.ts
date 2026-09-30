@@ -47,6 +47,8 @@ export const settings = {
     maxRows: intEnv('SF_MAX_ROWS', 200),
     hardMaxRows: intEnv('SF_HARD_MAX_ROWS', 2000),
     maxTextChars: intEnv('SF_MAX_TEXT_CHARS', 4000),
+    // total size of one tool result; keeps the model's context (and free-tier token use) bounded
+    maxResponseChars: intEnv('SF_MAX_RESPONSE_CHARS', 16000),
     cacheDir: process.env.SF_CACHE_DIR ?? '',
     cacheTtlSeconds: intEnv('SF_CACHE_TTL_S', 7 * 24 * 3600)
 };

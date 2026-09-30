@@ -56,3 +56,16 @@ test('cache computes once per key and does not cache errors', async () => {
     await assert.rejects(cached(['t', 2], async () => { throw new Error('boom'); }));
     assert.equal(await cached(['t', 2], compute), 2);
 });
+
+test('fitToBudget keeps whole records within the response budget', async () => {
+    const { fitToBudget } = await import('../src/salesforce.js');
+    const records = Array.from({ length: 10 }, (_, i) => ({ Id: `r${i}`, Body__c: 'x'.repeat(100) }));
+    const out = fitToBudget({ totalSize: 10, returned: 10, truncated: false, records }, 400);
+    assert.equal(out.returned, 3);
+    assert.equal(out.truncated, true);
+    assert.match(out.note ?? '', /3 of 10 rows/);
+    const small = fitToBudget({ totalSize: 1, returned: 1, truncated: false, records: records.slice(0, 1) }, 400);
+    assert.equal(small.truncated, false);
+    // a single oversized record is still returned (never an empty answer)
+    assert.equal(fitToBudget({ totalSize: 1, returned: 1, truncated: false, records }, 10).returned, 1);
+});

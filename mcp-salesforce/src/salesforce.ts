@@ -92,19 +92,40 @@ export interface QueryOutput {
     returned: number;
     truncated: boolean;
     records: Row[];
+    note?: string;
+}
+
+/** Keep whole records until the response budget is used; say so when rows were cut. */
+export function fitToBudget(out: QueryOutput, budget = settings.maxResponseChars): QueryOutput {
+    let used = 0;
+    const kept: Row[] = [];
+    for (const r of out.records) {
+        const size = JSON.stringify(r).length + 1;
+        if (kept.length > 0 && used + size > budget) break;
+        kept.push(r);
+        used += size;
+    }
+    if (kept.length === out.records.length) return out;
+    return {
+        ...out,
+        returned: kept.length,
+        truncated: true,
+        records: kept,
+        note: `Only ${kept.length} of ${out.records.length} rows fit in one response. Filter further, select fewer or shorter fields, or aggregate.`
+    };
 }
 
 export function soqlQuery(org: OrgName, soql: string, maxRows: number): Promise<QueryOutput> {
     return withConnection(org, async conn => {
         const result = await conn.query(soql, { autoFetch: true, maxFetch: maxRows });
         const records = dropEmptyColumns((result.records as unknown[]).slice(0, maxRows).map(r => cleanRecord(r) as Row));
-        return {
+        return fitToBudget({
             totalSize: result.totalSize,
             returned: records.length,
             // COUNT() returns no rows; only a result cut at the row cap is truncated
             truncated: records.length >= maxRows && result.totalSize > records.length,
             records
-        };
+        });
     });
 }
 
@@ -113,7 +134,7 @@ export function soslSearch(org: OrgName, sosl: string, maxRows: number): Promise
         const result = await conn.search(sosl);
         const all = (result.searchRecords ?? []) as unknown[];
         const records = all.slice(0, maxRows).map(r => cleanRecord(r, true) as Row);
-        return { totalSize: all.length, returned: records.length, truncated: all.length > records.length, records };
+        return fitToBudget({ totalSize: all.length, returned: records.length, truncated: all.length > records.length, records });
     });
 }
 
