@@ -64,8 +64,11 @@ def test_confidential_articles_and_request_terms():
 
 
 def test_presidio_request_and_scrub_keep_salesforce_ids():
+    from app.guard import pii
+
     entities = analyze_request("Which city is listed for Ava Brown in our records?")
-    assert any(e["type"] == "PERSON" for e in entities)
+    if pii.ENGINE == "presidio":  # name detection needs spaCy (blocked on some Windows hosts)
+        assert any(e["type"] == "PERSON" for e in entities)
     text, removed = scrub("Contact 003Wt00000JqmLtIAJ: email jane.doe@example.com, phone 415-555-0133")
     assert "003Wt00000JqmLtIAJ" in text
     assert "jane.doe@example.com" not in text and "415-555-0133" not in text
@@ -78,3 +81,14 @@ def test_prompt_guard_score_parsing():
     assert parse_score("MALICIOUS") == 1.0
     assert parse_score("BENIGN") == 0.0
     assert parse_score("") is None
+
+
+def test_pattern_fallback_finds_contact_details_and_ids(monkeypatch):
+    from app.guard import pii
+
+    monkeypatch.setattr(pii, "_engines", lambda: (None, None))
+    found = {e["type"] for e in pii.analyze_request("Email me at a.b@example.com about 003Ws00000DYTkrIAH")}
+    assert found == {"EMAIL_ADDRESS", "SALESFORCE_ID"}
+    text, removed = pii.scrub("Id 003Wt00000JqmLtIAJ, call +1 415-555-0133 or mail jane@example.org")
+    assert text == "Id 003Wt00000JqmLtIAJ, call [REDACTED] or mail [REDACTED]"
+    assert removed == ["EMAIL_ADDRESS", "PHONE_NUMBER"]

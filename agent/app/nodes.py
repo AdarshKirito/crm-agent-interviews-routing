@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from . import state_keys as K
 from .checker import check_answer, has_refusal_wording
 from .config import MAX_CHECKER_RETRIES, MAX_CLARIFYING_QUESTIONS, MODE, PROMPT_GUARD_THRESHOLD, ROUTER_MIN_CONFIDENCE
+from .guard import pii
 from .guard.pii import analyze_request, scrub
 from .guard.prompt_guard import injection_score
 from .guard.sensitive import PERSON_ID_PREFIXES, ids_in, in_ids, load_map
@@ -90,6 +91,7 @@ async def screen(ctx):
     self_ids = current_self_ids(state)
     other_ids = [i for i in ids_in(all_text) if i.startswith(PERSON_ID_PREFIXES) and not in_ids(i, self_ids)]
     signals["pii"] = [f"{e['type']}:{e['text']}" for e in entities if e["type"] != "SALESFORCE_ID"]
+    signals["pii_engine"] = pii.ENGINE
     signals["terms"] = load_map().request_signals(all_text)
     signals["other_customer_ids"] = other_ids
     if other_ids:
