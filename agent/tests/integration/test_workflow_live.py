@@ -16,12 +16,18 @@ from google.adk.apps import App
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
+from app import nodes
 from app import state_keys as K
 from app.agent import build_root_agent
 
 from .scripted_llm import ScriptedLlm, call, last_tool_text
 
 pytestmark = pytest.mark.skipif(os.getenv("CRMROUTE_LIVE_MCP") != "1", reason="needs live MCP servers (CRMROUTE_LIVE_MCP=1)")
+
+# These tests exercise the graph, not the fitted routing table (agent/app/data/routing.yaml
+# changes whenever dev is refitted): every task goes to the big solver unless a test says otherwise.
+ALL_BIG = {"default": "big", "tiers": {}}
+nodes.load_routing_table = lambda: ALL_BIG
 
 B2B_CUSTOMER = "003Wt00000JqmLtIAJ"
 ID18 = re.compile(r"\b005[A-Za-z0-9]{15}\b")
@@ -169,3 +175,18 @@ async def test_multi_turn_clarify_then_answer_keeps_conversation_in_state():
     second = str(models["solver_big"].requests[-1].config.system_instruction)
     assert "Which states have the quickest case closure time?" in second  # earlier turn carried in state
     assert [t["role"] for t in state[K.CONVERSATION]] == ["user", "agent", "user", "agent"]
+
+
+@pytest.mark.asyncio
+async def test_routing_table_sends_a_task_type_to_the_small_solver():
+    nodes.load_routing_table = lambda: {"default": "big", "tiers": {"best_region_identification": "small"}}
+    try:
+        finals, state, models = await run_turns(
+            {K.ORG: "b2b", K.AUDIENCE: "employee", K.INTERACTIVE: False, K.TASK_CONTEXT: "- Today's date: 2022-10-26"},
+            ["Which states have the quickest case closure time in the past 6 quarters? Return only the two-letter code."],
+            {"solver_small": [answer("answer", "MI")]},
+        )
+    finally:
+        nodes.load_routing_table = lambda: ALL_BIG
+    assert state[K.ROUTE]["task_type"] == "best_region_identification" and state[K.ROUTE]["tier"] == "small"
+    assert finals == ["MI"] and not models["solver_big"].requests
