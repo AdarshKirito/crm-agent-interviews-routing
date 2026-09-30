@@ -51,8 +51,8 @@ def make_sheet(systems: list[str], n: int, out: str, seed: int) -> None:
     for spec in systems:
         name, path = spec.split("=", 1)
         for key, row in load_system(Path(path)).items():
-            if isinstance(row.get("reward"), dict):
-                continue  # fuzzy_match: not judged by the LLM
+            if isinstance(row.get("reward"), dict) or row.get("error"):
+                continue  # fuzzy_match is not judged by the LLM; API errors were never graded
             pool.append((name, key, row))
     rng = random.Random(seed)
     by_type = defaultdict(list)
