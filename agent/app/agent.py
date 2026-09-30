@@ -9,12 +9,12 @@
 
 from google.adk import Agent, Workflow
 from google.adk.apps import App
-from google.adk.models import BaseLlm, Gemini
-from google.genai import types
+from google.adk.models import BaseLlm
 
 from . import state_keys as K
-from .config import BIG_MODEL, MAX_OUTPUT_TOKENS, SMALL_MODEL, TEMPERATURE, THINKING_LEVEL
+from .config import BIG_MODEL, FALLBACK, MAX_OUTPUT_TOKENS, POLICY_MODEL, SMALL_MODEL
 from .guard.tool_guard import after_tool, before_tool
+from .models import build_model, generation_config
 from .nodes import GuardVerdict, SolverOutput, check, decide, finalize, intake, refuse, route_task, screen
 from .prompts import policy_instruction, solver_instruction
 from .tools import build_toolsets
@@ -22,18 +22,6 @@ from .tracing import setup_tracing
 from .usage import usage_callback
 
 setup_tracing()
-
-
-def _model(name: str) -> Gemini:
-    return Gemini(model=name, retry_options=types.HttpRetryOptions(attempts=4, initial_delay=2.0))
-
-
-def _config(max_tokens: int = MAX_OUTPUT_TOKENS) -> types.GenerateContentConfig:
-    return types.GenerateContentConfig(
-        temperature=TEMPERATURE,
-        max_output_tokens=max_tokens,
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel(THINKING_LEVEL.upper())),
-    )
 
 
 TOOLSETS = build_toolsets()
@@ -48,26 +36,28 @@ def _solver(name: str, model: BaseLlm, model_name: str) -> Agent:
         tools=TOOLSETS,
         output_schema=SolverOutput,
         output_key=K.DRAFT,
-        generate_content_config=_config(),
+        generate_content_config=generation_config(model_name, MAX_OUTPUT_TOKENS),
         before_tool_callback=before_tool,
         after_tool_callback=after_tool,
         after_model_callback=usage_callback(model_name, name),
     )
 
 
-def build_root_agent(big: BaseLlm | None = None, small: BaseLlm | None = None, policy: BaseLlm | None = None) -> Workflow:
+def build_root_agent(big: BaseLlm | None = None, small: BaseLlm | None = None, policy: BaseLlm | None = None,
+                     fallback: bool = FALLBACK) -> Workflow:
     """Build the workflow. Models can be injected (tests use scripted ones); the
-    Workflow copies its nodes, so they must be set here rather than patched later."""
-    solver_big = _solver("solver_big", big or _model(BIG_MODEL), BIG_MODEL)
-    solver_small = _solver("solver_small", small or _model(SMALL_MODEL), SMALL_MODEL)
+    Workflow copies its nodes, so they must be set here rather than patched later.
+    `fallback` is for the local demo only; measured runs keep one pinned model per role."""
+    solver_big = _solver("solver_big", big or build_model(BIG_MODEL, fallback), BIG_MODEL)
+    solver_small = _solver("solver_small", small or build_model(SMALL_MODEL, fallback), SMALL_MODEL)
     policy_check = Agent(
         name="policy_check",
-        model=policy or _model(SMALL_MODEL),
+        model=policy or build_model(POLICY_MODEL, fallback),
         description="Applies the written confidentiality policy to a customer's request.",
         instruction=policy_instruction,
         output_schema=GuardVerdict,
-        generate_content_config=_config(2048),
-        after_model_callback=usage_callback(SMALL_MODEL, "policy_check"),
+        generate_content_config=generation_config(POLICY_MODEL, 2048),
+        after_model_callback=usage_callback(POLICY_MODEL, "policy_check"),
     )
     return Workflow(
         name="crmroute",

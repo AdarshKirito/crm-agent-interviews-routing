@@ -22,4 +22,5 @@ FEEDBACK = "crm_feedback"
 CHECK = "crm_check"
 FINAL = "crm_final_response"
 USAGE = "crm_usage"
+CALLS = "crm_calls"  # one record per model call: component, model that answered, tokens
 BLOCKED_TOOLS = "crm_blocked_tool_calls"

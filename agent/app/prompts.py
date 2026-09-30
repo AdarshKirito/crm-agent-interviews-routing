@@ -106,10 +106,12 @@ def solver_instruction(ctx: ReadonlyContext) -> str:
 
     parts.append(
         "## Final output\n"
-        "kind=answer: `answer` holds ONLY the final answer in the answer form above, no sentences or explanation.\n"
-        "kind=clarify: `answer` holds your one question.\n"
-        "kind=refuse: `answer` says you cannot share this because it is private or confidential.\n"
-        "known_details: the task details the user has given so far (e.g. 'time period: past 4 months').\n"
+        "When you are done, call the `set_model_response` tool (do not write your answer as plain text) with:\n"
+        "- kind: \"answer\", \"clarify\" or \"refuse\"\n"
+        "- answer: for kind answer, ONLY the final answer in the answer form above, no sentences or explanation; "
+        "for clarify, your one question; for refuse, one sentence saying you cannot share this because it is "
+        "private or confidential\n"
+        "- known_details: the task details the user has given so far, as a list of short strings\n"
     )
     schema = load_schema(org)
     if schema:

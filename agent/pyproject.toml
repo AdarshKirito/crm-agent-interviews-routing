@@ -17,6 +17,8 @@ dependencies = [
     "pyyaml>=6.0.1",
     "openinference-instrumentation-google-adk>=0.1.28",
     "arize-phoenix-otel>=0.17",
+    "litellm>=1.84,!=1.82.7,!=1.82.8",
+    "python-dotenv>=1.0",
     "opentelemetry-resourcedetector-gcp<=1.12.0a0",
     "gcsfs>=2024.11.0",
     "a2a-sdk[http-server]>=1.0,<2",

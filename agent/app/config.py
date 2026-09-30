@@ -1,17 +1,48 @@
-"""Runtime settings for the crmroute agent (all overridable by environment variables)."""
+"""Runtime settings for the crmroute agent (all overridable by environment variables).
+
+Keys come from the repository-root .env (never committed). Existing environment
+variables win over the file.
+"""
 
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(REPO_ROOT / ".env", override=False)
+# ADK / google-genai: AI Studio key, not Vertex.
+if os.getenv("GEMINI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
+    os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
+os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "FALSE")
+os.environ.setdefault("GOOGLE_GENAI_USE_ENTERPRISE", "FALSE")
+
 DATA_DIR = Path(__file__).parent / "data"
 
+# Model per role. A bare "gemini-..." name uses the AI Studio key natively; any
+# "provider/model" string goes through LiteLLM (see app/models.py).
 BIG_MODEL = os.getenv("CRMROUTE_BIG_MODEL", "gemini-3.8-flash")
 SMALL_MODEL = os.getenv("CRMROUTE_SMALL_MODEL", "gemini-3.1-flash-lite")
+POLICY_MODEL = os.getenv("CRMROUTE_POLICY_MODEL", SMALL_MODEL)
 # One thinking level everywhere; it must match the baselines (CRMARENA_THINKING_LEVEL).
 THINKING_LEVEL = os.getenv("CRMROUTE_THINKING_LEVEL", "low")
-# Google recommends temperature 1.0 for Gemini 3; the baselines use the same value.
-TEMPERATURE = float(os.getenv("CRMROUTE_TEMPERATURE", "1.0"))
 MAX_OUTPUT_TOKENS = int(os.getenv("CRMROUTE_MAX_OUTPUT_TOKENS", "8192"))
+
+# Measured runs pin one model per role and wait out rate limits (up to this long per
+# call). CRMROUTE_FALLBACK=1 is for the local demo only: on a provider error the call
+# moves along FALLBACK_CHAIN.
+MAX_RETRY_WAIT_S = float(os.getenv("CRMROUTE_MAX_RETRY_WAIT_S", "900"))
+FALLBACK = os.getenv("CRMROUTE_FALLBACK", "0").lower() in ("1", "true", "yes")
+FALLBACK_CHAIN = [m.strip() for m in os.getenv(
+    "CRMROUTE_FALLBACK_CHAIN",
+    "gemini-3.8-flash,gemini-3.1-flash-lite,mistral/mistral-small-latest,groq/openai/gpt-oss-120b,"
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free,ollama_chat/qwen3:8b",
+).split(",") if m.strip()]
+OLLAMA_API_BASE = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+OLLAMA_NUM_CTX = int(os.getenv("CRMROUTE_OLLAMA_NUM_CTX", "16384"))
+OLLAMA_THINK = os.getenv("CRMROUTE_OLLAMA_THINK", "0").lower() in ("1", "true", "yes")
+# Every model call is appended here as JSON lines (model that answered, tokens, waits).
+CALL_LOG = os.getenv("CRMROUTE_CALL_LOG", str(REPO_ROOT / "runs" / "calls.jsonl"))
 
 # "no_route": every task on the big model (system 3). "route": the small model
 # where the routing table allows (system 4). "all_small": every task on the small
