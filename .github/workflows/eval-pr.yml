@@ -1,10 +1,10 @@
-# Runs the 15 fixed CI cases (evals/ci_cases.json) on Gemini 3.1 Flash-Lite through the
-# CRMArena-Pro harness and fails if the success or refusal rate drops below
-# evals/ci_baseline.json. Needs:
-#   vars:    GCP_PROJECT_ID, GCP_WIF_PROVIDER, GCP_SERVICE_ACCOUNT,
-#            CRMARENA_JUDGE_MODEL, CRMARENA_JUDGE_PROVIDER
-#   secrets: SALESFORCE_B2B_USERNAME/_PASSWORD/_SECURITY_TOKEN, SALESFORCE_B2C_*,
-#            OPENAI_API_KEY (only if the judge is an OpenAI model), GROQ_API_KEY (optional)
+# Runs the 15 fixed CI cases (evals/ci_cases.json) on Gemini 3.1 Flash-Lite (AI Studio free
+# tier, one pinned model for every role) through the CRMArena-Pro harness and fails if the
+# success or refusal rate drops below evals/ci_baseline.json. Free keys only, no GCP.
+# Needs secrets: GEMINI_API_KEY, GROQ_API_KEY (judge + Prompt Guard), MISTRAL_API_KEY
+# (optional), SALESFORCE_B2B_USERNAME/_PASSWORD/_SECURITY_TOKEN and SALESFORCE_B2C_*.
+# Optional vars CRMARENA_JUDGE_MODEL / CRMARENA_JUDGE_PROVIDER override the CI judge; the
+# baseline in evals/ci_baseline.json must have been made with the same judge.
 name: PR eval (15 cases, Flash-Lite)
 
 on:
@@ -19,25 +19,25 @@ on:
 
 permissions:
   contents: read
-  id-token: write
   pull-requests: write
 
 jobs:
   eval:
-    # skipped until the GCP repo variables are set
-    if: vars.GCP_PROJECT_ID != ''
+    # enable with the repository variable CRMROUTE_PR_EVAL=true (after adding the secrets)
+    if: vars.CRMROUTE_PR_EVAL == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      GOOGLE_GENAI_USE_VERTEXAI: "true"
-      GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
-      GOOGLE_CLOUD_LOCATION: global
-      VERTEXAI_PROJECT: ${{ vars.GCP_PROJECT_ID }}
-      VERTEXAI_LOCATION: global
-      CRMARENA_JUDGE_MODEL: ${{ vars.CRMARENA_JUDGE_MODEL }}
-      CRMARENA_JUDGE_PROVIDER: ${{ vars.CRMARENA_JUDGE_PROVIDER }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_GENAI_USE_VERTEXAI: "FALSE"
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      CRMARENA_JUDGE_MODEL: ${{ vars.CRMARENA_JUDGE_MODEL || 'openai/gpt-oss-120b' }}
+      CRMARENA_JUDGE_PROVIDER: ${{ vars.CRMARENA_JUDGE_PROVIDER || 'groq' }}
+      CRMARENA_USER_MODEL: ${{ vars.CRMARENA_USER_MODEL || 'gemini/gemini-3.1-flash-lite' }}
+      CRMARENA_USER_PROVIDER: ${{ vars.CRMARENA_USER_PROVIDER || 'gemini' }}
+      PYTHONIOENCODING: utf-8
       SALESFORCE_B2B_USERNAME: ${{ secrets.SALESFORCE_B2B_USERNAME }}
       SALESFORCE_B2B_PASSWORD: ${{ secrets.SALESFORCE_B2B_PASSWORD }}
       SALESFORCE_B2B_SECURITY_TOKEN: ${{ secrets.SALESFORCE_B2B_SECURITY_TOKEN }}
@@ -46,11 +46,6 @@ jobs:
       SALESFORCE_B2C_SECURITY_TOKEN: ${{ secrets.SALESFORCE_B2C_SECURITY_TOKEN }}
     steps:
       - uses: actions/checkout@v5
-
-      - uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - uses: actions/setup-node@v5
         with:
@@ -87,7 +82,8 @@ jobs:
           (cd mcp-salesforce && nohup node dist/index.js --http --port 3333 --env ../vendor/CRMArena/.env > ../runs/ci/logs/mcp_sf.log 2>&1 &)
           (cd search && QDRANT_LOCAL_PATH=../data/qdrant HYBRID_ENABLED=true HYBRID_ONLY=true QDRANT_READ_ONLY=true \
              FASTMCP_SERVER_PORT=8765 nohup .venv/bin/mcp-server-qdrant --transport streamable-http > ../runs/ci/logs/mcp_search.log 2>&1 &)
-          (cd agent && CRMROUTE_BIG_MODEL=gemini-3.1-flash-lite CRMROUTE_MODE=no_route \
+          (cd agent && CRMROUTE_BIG_MODEL=gemini-3.1-flash-lite CRMROUTE_SMALL_MODEL=gemini-3.1-flash-lite \
+             CRMROUTE_POLICY_MODEL=gemini-3.1-flash-lite CRMROUTE_FALLBACK=0 CRMROUTE_MODE=no_route \
              nohup .venv/bin/uvicorn app.fast_api_app:app --host 127.0.0.1 --port 8000 > ../runs/ci/logs/agent.log 2>&1 &)
           for i in $(seq 1 90); do curl -sf http://127.0.0.1:8000/list-apps && break; sleep 2; done
 
