@@ -92,3 +92,33 @@ def test_pattern_fallback_finds_contact_details_and_ids(monkeypatch):
     text, removed = pii.scrub("Id 003Wt00000JqmLtIAJ, call +1 415-555-0133 or mail jane@example.org")
     assert text == "Id 003Wt00000JqmLtIAJ, call [REDACTED] or mail [REDACTED]"
     assert removed == ["EMAIL_ADDRESS", "PHONE_NUMBER"]
+
+
+def test_policy_node_reads_last_json_verdict_and_stays_out_of_history():
+    import asyncio
+    from types import SimpleNamespace
+
+    from google.adk.models.llm_response import LlmResponse
+    from google.genai import types
+
+    from app.nodes import make_policy_check
+
+    class Reply:
+        model = "groq/openai/gpt-oss-20b"
+
+        def __init__(self, text):
+            self.text, self.seen = text, []
+
+        async def generate_content_async(self, request, stream=False):
+            self.seen.append(request)
+            yield LlmResponse(content=types.Content(role="model", parts=[types.Part.from_text(text=self.text)]))
+
+    ctx = SimpleNamespace(state={"crm_conversation": [{"role": "user", "text": "What is a weakness of CircuitWave?"}]})
+    for text in ['{"decision":"refuse","category":"confidential_company_knowledge","rationale":"competitor analysis"}',
+                 'We need a GuardVerdict. {"decision": "refuse", "category": "confidential_company_knowledge", "rationale": "x"}']:
+        llm = Reply(text)
+        verdict = asyncio.run(make_policy_check(llm, llm.model)(ctx))
+        assert verdict["decision"] == "refuse" and verdict["category"] == "confidential_company_knowledge"
+        assert llm.seen[0].config.response_schema is not None
+    assert asyncio.run(make_policy_check(Reply("no json here"), "m")(ctx)) == {}
+    assert ctx.state["crm_calls"][-1]["component"] == "policy_check"

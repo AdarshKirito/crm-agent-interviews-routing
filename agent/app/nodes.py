@@ -101,6 +101,41 @@ async def screen(ctx):
     yield Event(state={K.SCREEN: signals}, route="classify")
 
 
+def make_policy_check(llm, model_name: str, max_tokens: int = 2048):
+    """Build the policy-classifier node. It calls the pinned model directly (not as an
+    agent node), so its verdict goes to state only and never enters the conversation
+    the solver sees -- as an agent node, small solvers echoed its rationale as their answer."""
+    from google.adk.models.llm_request import LlmRequest
+
+    from .models import generation_config
+    from .prompts import policy_instruction
+    from .usage import add_usage
+
+    async def policy_check(ctx):
+        config = generation_config(model_name, max_tokens)
+        config.system_instruction = policy_instruction(ctx)
+        config.response_schema = GuardVerdict
+        config.response_mime_type = "application/json"
+        request = LlmRequest(model=model_name, config=config, contents=[types.Content(role="user", parts=[
+            types.Part.from_text(text="Return your verdict on the customer messages above as JSON.")])])
+        last = None
+        async for response in llm.generate_content_async(request, stream=False):
+            last = response
+        meta = dict((last.custom_metadata if last else None) or {})
+        add_usage(ctx.state, meta.get("answered_by") or model_name, "policy_check", last.usage_metadata if last else None, meta)
+        text = "".join(p.text or "" for p in ((last.content.parts if last and last.content else None) or []) if not p.thought)
+        start, end = text.rfind("{"), text.rfind("}")
+        # the verdict is the last JSON object in the reply (some models print reasoning first)
+        while 0 <= start < end:
+            try:
+                return GuardVerdict.model_validate_json(text[start:end + 1]).model_dump()
+            except ValueError:
+                start = text.rfind("{", 0, start) if start > 0 else -1
+        return {}
+
+    return policy_check
+
+
 def decide(ctx, node_input: Any):
     """Combine the policy classifier's verdict with the screening signals."""
     verdict = node_input if isinstance(node_input, dict) else {}

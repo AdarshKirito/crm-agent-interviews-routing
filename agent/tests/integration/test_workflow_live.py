@@ -149,6 +149,9 @@ async def test_customer_knowledge_question_uses_hybrid_search_and_hides_confiden
     # the policy classifier saw the request and the sensitive-phrase signal
     policy_prompt = str(models["policy_check"].requests[0].config.system_instruction)
     assert "discount tier" in policy_prompt
+    # ...and its verdict never entered the solver's conversation (small models echoed it)
+    solver_contents = str(models["solver_big"].requests[0].contents)
+    assert '"decision"' not in solver_contents and "rationale" not in solver_contents
 
 
 @pytest.mark.asyncio

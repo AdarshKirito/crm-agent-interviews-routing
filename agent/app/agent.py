@@ -15,8 +15,8 @@ from . import state_keys as K
 from .config import BIG_MODEL, FALLBACK, MAX_OUTPUT_TOKENS, POLICY_MODEL, SMALL_MODEL
 from .guard.tool_guard import after_tool, before_tool
 from .models import build_model, generation_config
-from .nodes import GuardVerdict, SolverOutput, check, decide, finalize, intake, refuse, route_task, screen
-from .prompts import policy_instruction, solver_instruction
+from .nodes import SolverOutput, check, decide, finalize, intake, make_policy_check, refuse, route_task, screen
+from .prompts import solver_instruction
 from .tools import build_toolsets
 from .tracing import setup_tracing
 from .usage import usage_callback
@@ -50,15 +50,8 @@ def build_root_agent(big: BaseLlm | None = None, small: BaseLlm | None = None, p
     `fallback` is for the local demo only; measured runs keep one pinned model per role."""
     solver_big = _solver("solver_big", big or build_model(BIG_MODEL, fallback), BIG_MODEL)
     solver_small = _solver("solver_small", small or build_model(SMALL_MODEL, fallback), SMALL_MODEL)
-    policy_check = Agent(
-        name="policy_check",
-        model=policy or build_model(POLICY_MODEL, fallback),
-        description="Applies the written confidentiality policy to a customer's request.",
-        instruction=policy_instruction,
-        output_schema=GuardVerdict,
-        generate_content_config=generation_config(POLICY_MODEL, 2048),
-        after_model_callback=usage_callback(POLICY_MODEL, "policy_check"),
-    )
+    # a function node, not an agent: its verdict must stay out of the solver's conversation
+    policy_check = make_policy_check(policy or build_model(POLICY_MODEL, fallback), POLICY_MODEL)
     return Workflow(
         name="crmroute",
         edges=[
