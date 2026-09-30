@@ -60,5 +60,7 @@ PROMPT_GUARD_MODEL = os.getenv("CRMROUTE_PROMPT_GUARD_MODEL", "meta-llama/llama-
 PROMPT_GUARD_THRESHOLD = float(os.getenv("CRMROUTE_PROMPT_GUARD_THRESHOLD", "0.9"))
 
 MAX_CHECKER_RETRIES = int(os.getenv("CRMROUTE_MAX_CHECKER_RETRIES", "1"))
+# Tool calls allowed per user turn (the ReAct baseline stops at 20 turns in total).
+MAX_TOOL_CALLS_PER_TURN = int(os.getenv("CRMROUTE_MAX_TOOL_CALLS_PER_TURN", "10"))
 MAX_CLARIFYING_QUESTIONS = int(os.getenv("CRMROUTE_MAX_CLARIFYING_QUESTIONS", "3"))
 ROUTER_MIN_CONFIDENCE = float(os.getenv("CRMROUTE_ROUTER_MIN_CONFIDENCE", "0.5"))

@@ -12,6 +12,7 @@ from typing import Any
 from google.adk.tools import BaseTool, ToolContext
 
 from .. import state_keys as K
+from ..config import MAX_TOOL_CALLS_PER_TURN
 from .sensitive import ids_in, in_ids, load_map, self_ids_from_context
 
 MAX_EVIDENCE_CHARS = 300_000
@@ -40,6 +41,13 @@ def current_self_ids(state: Any) -> set[str]:
 
 def before_tool(tool: BaseTool, args: dict[str, Any], tool_context: ToolContext) -> dict | None:
     state = tool_context.state
+    used = int(state.get(K.TOOL_CALLS_TURN) or 0)
+    if tool.name != "set_model_response":
+        if used >= MAX_TOOL_CALLS_PER_TURN:
+            return {"isError": True, "content": [{"type": "text", "text": (
+                f"Tool budget used up ({MAX_TOOL_CALLS_PER_TURN} calls for this request). "
+                "Give your final answer now from the data you already have.")}]}
+        state[K.TOOL_CALLS_TURN] = used + 1
     if state.get(K.AUDIENCE) != "customer":
         return None
     smap = load_map()

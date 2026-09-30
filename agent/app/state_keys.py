@@ -24,3 +24,4 @@ FINAL = "crm_final_response"
 USAGE = "crm_usage"
 CALLS = "crm_calls"  # one record per model call: component, model that answered, tokens
 BLOCKED_TOOLS = "crm_blocked_tool_calls"
+TOOL_CALLS_TURN = "crm_tool_calls_this_turn"

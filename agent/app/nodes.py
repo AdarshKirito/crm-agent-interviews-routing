@@ -59,6 +59,7 @@ def intake(ctx, node_input: Any):
         K.CONVERSATION: conversation,
         K.TURN: int(ctx.state.get(K.TURN) or 0) + 1,
         K.RETRIES: 0,
+        K.TOOL_CALLS_TURN: 0,
         K.FEEDBACK: "",
         K.DRAFT: {},
         K.CHECK: {},
