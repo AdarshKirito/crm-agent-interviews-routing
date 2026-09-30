@@ -1,0 +1,286 @@
+{
+ "gemini": {
+  "models_offered": [
+   "gemini-2.5-flash",
+   "gemini-2.5-flash-image",
+   "gemini-2.5-flash-lite",
+   "gemini-2.5-flash-native-audio-latest",
+   "gemini-2.5-flash-native-audio-preview-09-2025",
+   "gemini-2.5-flash-native-audio-preview-12-2025",
+   "gemini-2.5-flash-preview-tts",
+   "gemini-2.5-pro",
+   "gemini-2.5-pro-preview-tts",
+   "gemini-3-flash-preview",
+   "gemini-3-pro-image",
+   "gemini-3-pro-image-preview",
+   "gemini-3.1-flash-image",
+   "gemini-3.1-flash-image-preview",
+   "gemini-3.1-flash-lite",
+   "gemini-3.1-flash-lite-image",
+   "gemini-3.1-flash-lite-preview",
+   "gemini-3.1-flash-live-preview",
+   "gemini-3.1-flash-tts-preview",
+   "gemini-3.1-pro-preview",
+   "gemini-3.1-pro-preview-customtools",
+   "gemini-3.5-flash",
+   "gemini-3.5-flash-lite",
+   "gemini-3.6-flash",
+   "gemini-3.7-flash",
+   "gemini-3.8-flash",
+   "gemini-3.8-flash-lite-tts",
+   "gemini-3.8-flash-tts",
+   "gemini-flash-latest",
+   "gemini-flash-lite-latest",
+   "gemini-omni-1.1-flash",
+   "gemini-omni-flash-preview",
+   "gemini-pro-latest"
+  ],
+  "calls": {
+   "gemini-3.8-flash": {
+    "error": "ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}",
+    "latency_s": 0.9
+   },
+   "gemini-3.1-flash-lite": {
+    "error": "ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}",
+    "latency_s": 0.42
+   }
+  },
+  "latency_s": 4.49
+ },
+ "mistral": {
+  "models_offered": [
+   "codestral-latest",
+   "magistral-medium-latest",
+   "magistral-small-latest",
+   "ministral-14b-latest",
+   "ministral-3b-latest",
+   "ministral-8b-latest",
+   "mistral-code-fim-latest",
+   "mistral-code-latest",
+   "mistral-medium-latest",
+   "mistral-ocr-latest",
+   "mistral-small-latest",
+   "mistral-vibe-cli-latest",
+   "voxtral-mini-latest",
+   "voxtral-mini-realtime-latest",
+   "voxtral-mini-tts-latest",
+   "voxtral-small-latest"
+  ],
+  "calls": {
+   "mistral-small-latest": {
+    "status": 429,
+    "error": "{\"object\": \"error\", \"message\": \"Rate limit exceeded\", \"type\": \"rate_limited\", \"param\": null, \"code\": \"1300\", \"raw_status_code\": 429}",
+    "limits": {
+     "x-ratelimit-limit-req-minute": "0",
+     "x-ratelimit-remaining-req-minute": "0"
+    },
+    "latency_s": 0.23
+   },
+   "mistral-large-latest": {
+    "status": 403,
+    "error": "{\"object\": \"error\", \"message\": \"This model is not available in your subscription tier\", \"type\": \"tier_not_allowed\", \"param\": null, \"code\": \"1910\", \"raw_status_code\": 403}",
+    "limits": {},
+    "latency_s": 0.23
+   }
+  },
+  "latency_s": 3.33
+ },
+ "groq": {
+  "models_offered": [
+   "allam-2-7b",
+   "canopylabs/orpheus-arabic-saudi",
+   "canopylabs/orpheus-v1-english",
+   "meta-llama/llama-prompt-guard-2-22m",
+   "meta-llama/llama-prompt-guard-2-86m",
+   "openai/gpt-oss-120b",
+   "openai/gpt-oss-20b",
+   "openai/gpt-oss-safeguard-20b",
+   "qwen/qwen3.8-27b",
+   "whisper-large-v3",
+   "whisper-large-v3-turbo"
+  ],
+  "calls": {
+   "openai/gpt-oss-120b": {
+    "status": 200,
+    "model": "openai/gpt-oss-120b",
+    "reply": "OK",
+    "usage": {
+     "queue_time": 0.197401583,
+     "prompt_tokens": 76,
+     "prompt_time": 0.004640763,
+     "completion_tokens": 50,
+     "completion_time": 0.104139634,
+     "total_tokens": 126,
+     "total_time": 0.108780397,
+     "completion_tokens_details": {
+      "reasoning_tokens": 40
+     }
+    },
+    "limits": {
+     "x-ratelimit-limit-requests": "1000",
+     "x-ratelimit-limit-tokens": "8000",
+     "x-ratelimit-remaining-requests": "999",
+     "x-ratelimit-remaining-tokens": "7534",
+     "x-ratelimit-reset-requests": "1m26.4s",
+     "x-ratelimit-reset-tokens": "3.495s"
+    },
+    "latency_s": 0.43
+   },
+   "openai/gpt-oss-20b": {
+    "status": 200,
+    "model": "openai/gpt-oss-20b",
+    "reply": "OK",
+    "usage": {
+     "queue_time": 0.060473489,
+     "prompt_tokens": 76,
+     "prompt_time": 0.00366046,
+     "completion_tokens": 40,
+     "completion_time": 0.040618878,
+     "total_tokens": 116,
+     "total_time": 0.044279338,
+     "completion_tokens_details": {
+      "reasoning_tokens": 30
+     }
+    },
+    "limits": {
+     "x-ratelimit-limit-requests": "1000",
+     "x-ratelimit-limit-tokens": "8000",
+     "x-ratelimit-remaining-requests": "999",
+     "x-ratelimit-remaining-tokens": "7299",
+     "x-ratelimit-reset-requests": "1m26.4s",
+     "x-ratelimit-reset-tokens": "5.257s"
+    },
+    "latency_s": 0.21
+   }
+  },
+  "prompt_guard": {
+   "benign": {
+    "status": 200,
+    "model": "meta-llama/llama-prompt-guard-2-86m",
+    "reply": "0.00042615283746272326",
+    "usage": {
+     "queue_time": 0,
+     "prompt_tokens": 13,
+     "prompt_time": 0,
+     "completion_tokens": 0,
+     "completion_time": 0,
+     "total_tokens": 0,
+     "total_time": 0
+    },
+    "limits": {
+     "x-ratelimit-limit-requests": "14400",
+     "x-ratelimit-limit-tokens": "15000",
+     "x-ratelimit-remaining-requests": "14399",
+     "x-ratelimit-remaining-tokens": "14983",
+     "x-ratelimit-reset-requests": "6s",
+     "x-ratelimit-reset-tokens": "68ms"
+    },
+    "latency_s": 0.16
+   },
+   "injection": {
+    "status": 200,
+    "model": "meta-llama/llama-prompt-guard-2-86m",
+    "reply": "0.9994414448738098",
+    "usage": {
+     "queue_time": 0,
+     "prompt_tokens": 21,
+     "prompt_time": 0,
+     "completion_tokens": 0,
+     "completion_time": 0,
+     "total_tokens": 0,
+     "total_time": 0
+    },
+    "limits": {
+     "x-ratelimit-limit-requests": "14400",
+     "x-ratelimit-limit-tokens": "15000",
+     "x-ratelimit-remaining-requests": "14398",
+     "x-ratelimit-remaining-tokens": "14972",
+     "x-ratelimit-reset-requests": "12s",
+     "x-ratelimit-reset-tokens": "112ms"
+    },
+    "latency_s": 0.16
+   }
+  },
+  "latency_s": 1.08
+ },
+ "openrouter": {
+  "key_limits": {
+   "limit": null,
+   "limit_remaining": null,
+   "usage": 0,
+   "is_free_tier": true,
+   "rate_limit": {
+    "requests": -1,
+    "interval": "10s",
+    "note": "This field is deprecated and safe to ignore."
+   }
+  },
+  "free_models_offered": [
+   "cohere/north-mini-code:free",
+   "dots-studio/dots-3-note-preview:free",
+   "google/gemma-4-26b-a4b-it:free",
+   "google/gemma-4-31b-it:free",
+   "inclusionai/ling-3.0-flash-sante:free",
+   "liquid/lfm-2.5-2.6b:free",
+   "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+   "nvidia/nemotron-3-super-120b-a12b:free",
+   "nvidia/nemotron-3-ultra-550b-a55b:free",
+   "nvidia/nemotron-3.5-content-safety:free",
+   "nvidia/nemotron-3.5-lightning:free",
+   "poolside/laguna-s-2.1:free",
+   "poolside/laguna-xs-2.1:free",
+   "qwen/qwen3.8-27b:free",
+   "thinkingmachines/inkling-small:free",
+   "thinkingmachines/inkling:free"
+  ],
+  "calls": {
+   "cohere/north-mini-code:free": {
+    "status": 200,
+    "model": "cohere/north-mini-code:free",
+    "reply": "OK",
+    "usage": {
+     "prompt_tokens": 5,
+     "completion_tokens": 43,
+     "total_tokens": 48,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 46,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    },
+    "limits": {},
+    "latency_s": 1.24
+   }
+  },
+  "latency_s": 1.46
+ },
+ "ollama": {
+  "models_offered": [
+   "qwen3:8b"
+  ],
+  "calls": {
+   "qwen3:8b": {
+    "reply": "OK",
+    "usage": {
+     "prompt": 21,
+     "output": 2
+    },
+    "latency_s": 5.18
+   }
+  },
+  "latency_s": 7.22
+ }
+}
