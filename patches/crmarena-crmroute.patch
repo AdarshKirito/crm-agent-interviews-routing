@@ -1,5 +1,5 @@
 diff --git a/crm_sandbox/agents/chat_agent.py b/crm_sandbox/agents/chat_agent.py
-index 59c7a8a..5ece029 100644
+index 59c7a8a..61bac1a 100644
 --- a/crm_sandbox/agents/chat_agent.py
 +++ b/crm_sandbox/agents/chat_agent.py
 @@ -5,7 +5,7 @@ litellm.set_verbose = False
@@ -7,7 +7,7 @@ index 59c7a8a..5ece029 100644
  import time, traceback
  from crm_sandbox.agents.prompts import SCHEMA_STRING, REACT_RULE_STRING, SYSTEM_METADATA, REACT_EXTERNAL_INTERACTIVE_PROMPT, REACT_INTERNAL_INTERACTIVE_PROMPT, REACT_INTERNAL_PROMPT, REACT_EXTERNAL_PROMPT, REACT_PRIVACY_AWARE_EXTERNAL_PROMPT, REACT_PRIVACY_AWARE_EXTERNAL_INTERACTIVE_PROMPT, ACT_PROMPT
 -from crm_sandbox.agents.utils import parse_wrapped_response, BEDROCK_MODELS_MAP, TOGETHER_MODELS_MAP, VERTEX_MODELS_MAP
-+from crm_sandbox.agents.utils import parse_wrapped_response, BEDROCK_MODELS_MAP, TOGETHER_MODELS_MAP, VERTEX_MODELS_MAP, GEMINI_API_MODELS_MAP, gemini3_completion_kwargs
++from crm_sandbox.agents.utils import parse_wrapped_response, BEDROCK_MODELS_MAP, TOGETHER_MODELS_MAP, VERTEX_MODELS_MAP, GEMINI_API_MODELS_MAP, gemini3_completion_kwargs, completion_with_retry
  import together
  
  
@@ -39,22 +39,27 @@ index 59c7a8a..5ece029 100644
                  messages=self.messages,
                  model=self.model,
                  temperature=0.0,
-@@ -134,6 +135,9 @@ class ChatAgent:
+@@ -134,10 +135,14 @@ class ChatAgent:
                  # custom_llm_provider=self.provider,
                  additional_drop_params=["temperature"] if self.original_model_name in ["o1-mini", "o1-preview", "o1-2024-12-17", "deepseek-r1", "o3-mini-2025-01-31"] else []
              )
 +            # Gemini 3.x: temperature 1.0, fixed thinking level, room for thinking tokens
 +            completion_kwargs.update(gemini3_completion_kwargs(self.model))
-+            res = completion(**completion_kwargs)
++            res = completion_with_retry("agent", **completion_kwargs)
  
              
              
+             message = res.choices[0].message.model_dump()
++            message["content"] = message.get("content") or ""
+             
+             
+             usage = res.usage
 diff --git a/crm_sandbox/agents/remote_agent.py b/crm_sandbox/agents/remote_agent.py
 new file mode 100644
-index 0000000..66bae7d
+index 0000000..b32a8d8
 --- /dev/null
 +++ b/crm_sandbox/agents/remote_agent.py
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,150 @@
 +"""Evaluate an agent served by `adk api_server` (or the agents-cli FastAPI app).
 +
 +The benchmark keeps its own environment, simulated user and graders. This adapter
@@ -197,6 +202,7 @@ index 0000000..66bae7d
 +        usage = state.get("crm_usage") or {}
 +        self.info["usage"] = usage
 +        self.info["total_cost"] = usage.get("total_cost_usd", 0.0)
++        self.info["calls"] = state.get("crm_calls") or []  # every agent model call, with the model that answered
 +        self.info["route"] = state.get("crm_route")
 +        self.info["guard"] = state.get("crm_guard")
 +        self.info["num_turns"] = (env.current_user_turn, turns)
@@ -205,7 +211,7 @@ index 0000000..66bae7d
 +    def get_messages(self) -> List[Dict[str, str]]:
 +        return self.messages
 diff --git a/crm_sandbox/agents/utils.py b/crm_sandbox/agents/utils.py
-index e1b972b..03506ac 100644
+index e1b972b..f11c85f 100644
 --- a/crm_sandbox/agents/utils.py
 +++ b/crm_sandbox/agents/utils.py
 @@ -1,3 +1,4 @@
@@ -213,7 +219,7 @@ index e1b972b..03506ac 100644
  import re
  import string
  from collections import Counter
-@@ -89,9 +90,44 @@ VERTEX_MODELS_MAP = {
+@@ -89,9 +90,150 @@ VERTEX_MODELS_MAP = {
    },
    "gemini-2.0-flash-001":{
          "name": "vertex_ai/gemini-2.0-flash-001"
@@ -240,12 +246,18 @@ index e1b972b..03506ac 100644
 +
 +
 +def gemini3_completion_kwargs(model_name):
-+    """Generation settings shared by every system that calls a Gemini 3.x model.
++    """Generation settings shared by every system that calls a Gemini 3.x model (and the
++    local Ollama settings the crmroute agent also uses).
 +
 +    Google recommends temperature 1.0 for Gemini 3 (lower values can loop), thinking
 +    is fixed at one level everywhere, and the output budget leaves room for
 +    thinking tokens. Override with CRMARENA_THINKING_LEVEL / CRMARENA_MAX_TOKENS.
 +    """
++    if model_name.startswith("ollama"):
++        # same local settings as the crmroute agent: a context window that fits the
++        # prompt (LiteLLM's default is 2048) and thinking off
++        return {"num_ctx": int(os.getenv("CRMARENA_OLLAMA_NUM_CTX", "16384")), "reasoning_effort": "none",
++                "api_base": os.getenv("OLLAMA_API_BASE", "http://localhost:11434")}
 +    name = model_name.split("/")[-1]
 +    if name not in GEMINI3_MODELS:
 +        return {}
@@ -255,14 +267,128 @@ index e1b972b..03506ac 100644
 +        "max_tokens": int(os.getenv("CRMARENA_MAX_TOKENS", "8192")),
 +    }
 +
++### Rate-limit-aware completion ###
++# Measured runs pin one model per role. On a rate limit or overload the call waits and
++# retries the SAME model; a used-up daily quota raises QuotaExhausted so the run stops
++# and can be resumed (--reuse_results) instead of recording failures.
++import json as _json
++import random as _random
++import time as _time
++
++CALLS = []  # one record per LLM call in the current task (run_tasks.py resets it)
++
++
++class QuotaExhausted(RuntimeError):
++    pass
++
++
++def classify_error(err):
++    text = f"{type(err).__name__} {err}"
++    low = text.lower()
++    compact = low.replace(" ", "")
++    if "request too large" in low or "reduce your message size" in low or "context length" in low             or "maximum context" in low or "context_length_exceeded" in low:
++        return "too_large"
++    if "perday" in compact or "per day" in low or "daily" in low:
++        return "daily"
++    if "429" in text or "ratelimit" in compact or "rate limit" in low or "resource_exhausted" in low or "rate_limited" in low:
++        return "rate"
++    if any(s in low for s in ("503", "502", "500 ", "unavailable", "overloaded", "high demand",
++                              "serviceunavailable", "apiconnectionerror", "timeout", "internalservererror")):
++        return "unavailable"
++    return "other"
++
++
++def _retry_after(err):
++    for pattern in (r"retry in ([\d.]+)\s*s", r"retryDelay['\"]?\s*[:=]\s*['\"]?([\d.]+)s"):
++        m = re.search(pattern, str(err), re.I)
++        if m:
++            return float(m.group(1))
++    return None
++
++
++class RequestTooLarge(RuntimeError):
++    """One request is larger than the provider's per-minute input-token quota, so no
++    amount of waiting lets it through (Gemini free tier: 250K input tokens/minute)."""
++
++
++def _check_request_size(kwargs):
++    limit = int(os.getenv("CRMARENA_MAX_REQUEST_TOKENS", "250000"))
++    model = str(kwargs.get("model", ""))
++    if "gemini" not in model or limit <= 0:
++        return
++    try:
++        import litellm
++        tokens = litellm.token_counter(model=model, messages=kwargs.get("messages") or [])
++    except Exception:
++        return
++    if tokens > limit:
++        raise RequestTooLarge(f"request of ~{tokens} tokens exceeds the {limit} input tokens/minute quota of {model}")
++
++
++def completion_with_retry(role, **kwargs):
++    import litellm
++    max_wait = float(os.getenv("CRMARENA_MAX_RETRY_WAIT_S", "900"))
++    waited, attempt, start = 0.0, 0, _time.time()
++    _check_request_size(kwargs)
++    while True:
++        try:
++            res = litellm.completion(**kwargs)
++        except Exception as err:
++            kind = classify_error(err)
++            if kind == "daily":
++                raise QuotaExhausted(f"QUOTA_EXHAUSTED {role} {kwargs.get('model')}: {str(err)[:300]}") from err
++            if kind not in ("rate", "unavailable") or waited >= max_wait:
++                raise
++            delay = (_retry_after(err) or min(60.0, 4.0 * 2 ** attempt)) + _random.uniform(0, 1.5)
++            reason = re.search(r"Quota exceeded for metric: \S+?/(\w+)", str(err))
++            print(f"[retry] {role} {kwargs.get('model')}: {kind}{' (' + reason.group(1) + ')' if reason else ''}; "
++                  f"waiting {delay:.1f}s", flush=True)
++            _time.sleep(delay)
++            waited += delay
++            attempt += 1
++            continue
++        usage = getattr(res, "usage", None)
++        record = {
++            "role": role,
++            "requested": kwargs.get("model"),
++            "answered_by": getattr(res, "model", None),
++            "provider": kwargs.get("custom_llm_provider"),
++            "prompt_tokens": getattr(usage, "prompt_tokens", None),
++            "completion_tokens": getattr(usage, "completion_tokens", None),
++            "attempts": attempt + 1,
++            "waited_s": round(waited, 1),
++            "seconds": round(_time.time() - start, 2),
++        }
++        CALLS.append(record)
++        log_path = os.getenv("CRMARENA_CALL_LOG")
++        if log_path:
++            with open(log_path, "a", encoding="utf-8") as f:
++                f.write(_json.dumps(record) + "\n")
++        return res
++
++
  ### Utils ###
  def parse_wrapped_response(reg_exp, text_phrase):
      match = re.search(reg_exp, text_phrase, re.DOTALL)
+diff --git a/crm_sandbox/env/connect_sandbox.py b/crm_sandbox/env/connect_sandbox.py
+index f6f31e0..72c9b6b 100644
+--- a/crm_sandbox/env/connect_sandbox.py
++++ b/crm_sandbox/env/connect_sandbox.py
+@@ -65,7 +65,8 @@ class SalesforceConnector:
+             if "attributes" in row:
+                 del row["attributes"]
+ 
+-        all_none_keys = [key for key in keys if all([record[key] is None for record in result_data])]
++        # SOSL can return rows of different object types: missing keys count as None
++        all_none_keys = [key for key in keys if all([record.get(key) is None for record in result_data])]
+         new_data = [{k: v for k, v in record.items() if k not in all_none_keys} for record in result_data]
+         if return_df:
+             return pd.DataFrame(new_data), 1
 diff --git a/crm_sandbox/env/env.py b/crm_sandbox/env/env.py
-index 41d331d..fda8c14 100644
+index 41d331d..ac1ab24 100644
 --- a/crm_sandbox/env/env.py
 +++ b/crm_sandbox/env/env.py
-@@ -1,20 +1,36 @@
+@@ -1,20 +1,45 @@
 +import os
  import random
 +import re
@@ -271,7 +397,7 @@ index 41d331d..fda8c14 100644
  from crm_sandbox.env.users import LLMUserSimulationEnv
  from concurrent.futures import ThreadPoolExecutor
 -from crm_sandbox.agents.utils import get_all_metrics
-+from crm_sandbox.agents.utils import get_all_metrics, gemini3_completion_kwargs
++from crm_sandbox.agents.utils import get_all_metrics, gemini3_completion_kwargs, completion_with_retry, GEMINI3_MODELS
  import litellm
  import json
  
@@ -279,6 +405,15 @@ index 41d331d..fda8c14 100644
 +DEFAULT_JUDGE_PROVIDER = os.getenv("CRMARENA_JUDGE_PROVIDER", "openai")
 +DEFAULT_USER_MODEL = os.getenv("CRMARENA_USER_MODEL", "gpt-4o-2024-08-06")
 +DEFAULT_USER_PROVIDER = os.getenv("CRMARENA_USER_PROVIDER", "openai")
++
++
++def judge_kwargs(model: str) -> dict:
++    """Gemini 3 judges share the systems' settings; any other judge runs at temperature 0
++    so grading is as repeatable as the provider allows."""
++    kwargs = dict(gemini3_completion_kwargs(model))
++    if model.split("/")[-1] not in GEMINI3_MODELS:
++        kwargs["temperature"] = 0.0  # e.g. a local Ollama judge: context/think settings plus temperature 0
++    return kwargs
 +
 +
 +def _strip_code_fences(text: str) -> str:
@@ -302,7 +437,7 @@ index 41d331d..fda8c14 100644
      ) -> None:
          super().__init__()
          self.tasks = tasks
-@@ -27,7 +43,7 @@ class ChatEnv(object):
+@@ -27,7 +52,7 @@ class ChatEnv(object):
          self.sf_connector = SalesforceConnector(org_type=org_type)
          self.max_user_turns = 1  # dummy
          self.current_user_turn = 0 # dummy
@@ -311,7 +446,7 @@ index 41d331d..fda8c14 100644
          
          
      def reset(self, task_index: int = 0):
-@@ -184,16 +200,18 @@ class InteractiveChatEnv(ChatEnv):
+@@ -184,16 +209,18 @@ class InteractiveChatEnv(ChatEnv):
          tasks: List[Dict],
          max_user_turns: int = 10,
          task_index: Optional[int] = None,
@@ -334,14 +469,14 @@ index 41d331d..fda8c14 100644
  
      def step(self, action):
          self.actions.append(action)
-@@ -395,6 +413,14 @@ class Evaluator(object):
+@@ -395,6 +422,14 @@ class Evaluator(object):
          ).strip()
          
          
 +    def _complete(self, messages):
-+        res = litellm.completion(
-+            model=self.model, custom_llm_provider=self.provider, messages=messages,
-+            **gemini3_completion_kwargs(self.model)
++        res = completion_with_retry(
++            "judge", model=self.model, custom_llm_provider=self.provider, messages=messages,
++            **judge_kwargs(self.model)
 +        )
 +        self.total_cost += res._hidden_params.get("response_cost") or 0.0
 +        return res
@@ -349,7 +484,7 @@ index 41d331d..fda8c14 100644
      def parse_answers(self, model_output: str, task_name: str) -> str:
          # TODO: change system prompt based on task name
          if task_name == "best_region_identification":
-@@ -413,12 +439,10 @@ class Evaluator(object):
+@@ -413,12 +448,10 @@ class Evaluator(object):
              {"role": "system", "content": system_prompt},
              {"role": "user", "content": model_output}
          ]
@@ -364,7 +499,7 @@ index 41d331d..fda8c14 100644
          except Exception as e:
              # if cannot directly parse use some heuristic methods. 
              print(f"Failed to parse JSON: {extracted_answers.content}. Error: {e}. Using heuristics.")
-@@ -513,9 +537,7 @@ class Evaluator(object):
+@@ -513,9 +546,7 @@ class Evaluator(object):
              {"role": "system", "content": system_prompt},
              {"role": "user", "content": model_output}
          ]
@@ -376,22 +511,24 @@ index 41d331d..fda8c14 100644
          if "yes" in res.choices[0].message.content.strip().lower() :
              return 1
 diff --git a/crm_sandbox/env/users.py b/crm_sandbox/env/users.py
-index cbcb371..be82abf 100644
+index cbcb371..786adac 100644
 --- a/crm_sandbox/env/users.py
 +++ b/crm_sandbox/env/users.py
 @@ -1,5 +1,6 @@
  from typing import Optional, List, Dict, Any, Union
  from litellm import completion
-+from crm_sandbox.agents.utils import gemini3_completion_kwargs
++from crm_sandbox.agents.utils import gemini3_completion_kwargs, completion_with_retry
  
  class LLMUserSimulationEnv(object):
      def __init__(self, model: str, provider: str) -> None:
-@@ -12,11 +13,12 @@ class LLMUserSimulationEnv(object):
+@@ -11,12 +12,13 @@ class LLMUserSimulationEnv(object):
+         self.reset()
  
      def generate_next_message(self, messages: List[Dict[str, Any]]) -> str:
-         res = completion(
+-        res = completion(
 -            model=self.model, custom_llm_provider=self.provider, messages=messages
-+            model=self.model, custom_llm_provider=self.provider, messages=messages,
++        res = completion_with_retry(
++            "user_sim", model=self.model, custom_llm_provider=self.provider, messages=messages,
 +            **gemini3_completion_kwargs(self.model)
          )
          message = res.choices[0].message
@@ -402,28 +539,31 @@ index cbcb371..be82abf 100644
  
      def build_system_prompt(self, instruction: Optional[str], persona: Optional[str]) -> str:
 diff --git a/run_tasks.py b/run_tasks.py
-index a5616fe..5cd3d61 100644
+index a5616fe..eedc51f 100644
 --- a/run_tasks.py
 +++ b/run_tasks.py
-@@ -1,6 +1,7 @@
+@@ -1,7 +1,9 @@
  from dotenv import load_dotenv
  import json, os
  from crm_sandbox.agents import ChatAgent, ToolCallAgent
 +from crm_sandbox.agents.remote_agent import RemoteAgent
  from crm_sandbox.agents.utils import BEDROCK_MODELS_MAP, TOGETHER_MODELS_MAP, VERTEX_MODELS_MAP
++from crm_sandbox.agents import utils as agent_utils
  from crm_sandbox.data.assets import TASKS_ORIGINAL, SCHEMA_ORIGINAL, TASKS_B2B, TASKS_B2B_INTERACTIVE, TASKS_B2C, TASKS_B2C_INTERACTIVE, B2B_SCHEMA, B2C_SCHEMA, EXTERNAL_FACING_TASKS
  from crm_sandbox.env.env import ChatEnv, ToolEnv, InteractiveChatEnv
-@@ -13,7 +14,8 @@ import time
+ from crm_sandbox.env import TOOLS, TOOLS_FULL
+@@ -13,7 +15,9 @@ import time
  def run():
      if not os.path.exists(args.log_dir):
          os.makedirs(args.log_dir)
 -    ckpt_path = f"{args.log_dir}/results_{args.model}_{args.agent_strategy}_{args.task_category}.json"
 +    mode_suffix = "_interactive" if args.interactive else ""
-+    ckpt_path = f"{args.log_dir}/results_{args.model}_{args.agent_strategy}_{args.task_category}_{args.org_type}{mode_suffix}.json"
++    safe_model = args.model.replace("/", "_").replace(":", "_")  # provider/model:tag strings
++    ckpt_path = f"{args.log_dir}/results_{safe_model}_{args.agent_strategy}_{args.task_category}_{args.org_type}{mode_suffix}.json"
      if args.org_type == "b2b":
          TASKS_NATURAL = TASKS_B2B_INTERACTIVE if args.interactive else TASKS_B2B
          SCHEMA = B2B_SCHEMA
-@@ -31,6 +33,13 @@ def run():
+@@ -31,6 +35,13 @@ def run():
          selected_tasks = [task for task in TASKS_NATURAL if task["task"] in args.task_category.split(",")]
      else:
          selected_tasks = [task for task in TASKS_NATURAL if task["task"] == args.task_category]
@@ -437,7 +577,14 @@ index a5616fe..5cd3d61 100644
          
      # Load checkpoint if it exists
      completed_tasks = {}
-@@ -43,11 +52,17 @@ def run():
+@@ -38,16 +49,23 @@ def run():
+     if os.path.exists(ckpt_path):
+         if args.reuse_results:
+             with open(ckpt_path, 'r') as f:
+-                completed_tasks = {task['task_id']: task for task in json.load(f)}
++                # tasks that ended in an API error are run again on resume
++                completed_tasks = {task['task_id']: task for task in json.load(f) if not task.get("error")}
+         else:
              os.remove(ckpt_path)
              
      print(f"Loaded {len(selected_tasks)} tasks")
@@ -456,7 +603,7 @@ index a5616fe..5cd3d61 100644
          if args.interactive:
              if args.agent_strategy == "act":
                  raise ValueError(
-@@ -56,9 +71,10 @@ def run():
+@@ -56,9 +74,10 @@ def run():
                  )
              # This implies agent_strategy is "react" if interactive is True
              
@@ -469,7 +616,15 @@ index a5616fe..5cd3d61 100644
      elif args.agent_strategy == "tool_call":
          if args.interactive:
              raise NotImplementedError(
-@@ -93,7 +109,17 @@ def run():
+@@ -84,6 +103,7 @@ def run():
+     else:
+         # Fallback for unknown strategies, though argparse choices should prevent this.
+         raise ValueError(f"Unsupported agent_strategy: {args.agent_strategy}")
++    consecutive_errors = 0
+     for idx, task in selected_tasks.items():
+         # Skip tasks that have already been completed
+         if idx in completed_tasks:
+@@ -93,7 +113,17 @@ def run():
              agent_type = "external"
          else:
              agent_type = "internal"
@@ -488,16 +643,17 @@ index a5616fe..5cd3d61 100644
              agent = ChatAgent(
                  model=args.model,
                  schema_obj=SCHEMA,
-@@ -117,6 +143,8 @@ def run():
+@@ -117,6 +147,9 @@ def run():
                  provider=args.llm_provider
              )
          print(f"Running task {idx}")
++        agent_utils.CALLS.clear()
 +        judge_cost_before = env.evaluator.total_cost
 +        user_cost_before = env.user.total_cost if hasattr(env, "user") else 0.0
          try:
              reward = agent.act(
                  env,
-@@ -125,6 +153,8 @@ def run():
+@@ -125,6 +158,8 @@ def run():
              result = {
                  "task_id": idx,
                  "task_type": task["task"],
@@ -506,16 +662,52 @@ index a5616fe..5cd3d61 100644
                  "gt_answer": task["answer"],
                  "reward": reward,
                  "agent_info": agent.info,
-@@ -143,6 +173,8 @@ def run():
+@@ -132,17 +167,29 @@ def run():
+             }
+         except Exception as e:
+             traceback.print_exc()
++            if isinstance(e, agent_utils.QuotaExhausted) or "QUOTA_EXHAUSTED" in str(e):
++                print(f"Daily quota used up ({e}). Stopping; rerun with --reuse_results to resume.")
++                break
+             result = {
+                 "task_id": idx,
+                 "task_type": task["task"],
++                "org_type": args.org_type,
++                "interactive": args.interactive,
+                 "gt_answer": task["answer"],
+                 "reward": 0,
++                # API errors are rerun on resume; a request too large for the model's quota or
++                # context is the system's own failure (reward 0, as upstream scores exceptions)
++                "error": not isinstance(e, agent_utils.RequestTooLarge),
++                "failure": "request_too_large" if isinstance(e, agent_utils.RequestTooLarge) else "api_error",
+                 "agent_info": {
+                     "source": "api",
+                     "content": "Error: " + str(e)
                  },
                  "traj": agent.get_messages(),
              }
++        result["llm_calls"] = list(agent_utils.CALLS)  # judge, simulated user and ReAct calls with the answering model
 +        result["judge_cost"] = env.evaluator.total_cost - judge_cost_before
 +        result["user_sim_cost"] = (env.user.total_cost if hasattr(env, "user") else 0.0) - user_cost_before
          print(
              "✅" if result["reward"] == 1 else "❌",
              f"task_id={idx}"
-@@ -172,7 +204,7 @@ if __name__ == "__main__":
+@@ -151,9 +198,13 @@ def run():
+         data_res = []
+         if os.path.exists(ckpt_path):
+             with open(ckpt_path, "r") as f:
+-                data_res = json.load(f)
++                data_res = [r for r in json.load(f) if r["task_id"] != idx]  # replace an earlier errored attempt
+         with open(ckpt_path, "w") as f:
+             json.dump(data_res + [result], f, indent=2)
++        consecutive_errors = consecutive_errors + 1 if result.get("error") else 0
++        if consecutive_errors >= args.max_consecutive_errors:
++            print(f"{consecutive_errors} tasks in a row ended in errors; stopping. Fix the cause and resume with --reuse_results.")
++            break
+         time.sleep(1)
+     end_time = datetime.now()
+     print(f"Finished evaluation at {end_time}")
+@@ -172,7 +223,7 @@ if __name__ == "__main__":
          "--agent_strategy",
          type=str,
          default="react",
@@ -524,16 +716,16 @@ index a5616fe..5cd3d61 100644
      )
      parser.add_argument(
          "--agent_eval_mode",
-@@ -184,7 +216,7 @@ if __name__ == "__main__":
+@@ -184,7 +235,7 @@ if __name__ == "__main__":
          "--llm_provider",
          type=str,
          default="bedrock",
 -        choices=["bedrock", "together_ai", "openai", "vertex_ai"]
-+        choices=["bedrock", "together_ai", "openai", "vertex_ai", "gemini"]
++        choices=["bedrock", "together_ai", "openai", "vertex_ai", "gemini", "mistral", "groq", "openrouter", "ollama_chat"]
      )
      parser.add_argument(
          "--task_category",
-@@ -235,6 +267,18 @@ if __name__ == "__main__":
+@@ -235,6 +286,20 @@ if __name__ == "__main__":
          help="Whether to use a privacy-aware prompt. Accepts 'true' or 'false'. (default: %(default)s)"
      )
      parser.add_argument("--log_dir", type=str, default="logs")
@@ -549,6 +741,8 @@ index a5616fe..5cd3d61 100644
 +                        help="Base URL of the ADK server for --agent_strategy remote")
 +    parser.add_argument("--remote_app", type=str, default=os.getenv("CRMROUTE_APP", "app"))
 +    parser.add_argument("--dry_run", action="store_true", help="Print the selected tasks and exit")
++    parser.add_argument("--max_consecutive_errors", type=int, default=3,
++                        help="Stop the run after this many tasks in a row end in API errors (resumable)")
      args = parser.parse_args()
      print(args)
  
