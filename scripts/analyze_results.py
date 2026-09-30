@@ -52,6 +52,25 @@ def cost_of(r: dict) -> float:
     return float(info.get("total_cost") or 0.0)
 
 
+def agent_calls_of(r: dict) -> list[dict]:
+    """The system's own model calls: the agent server's per-call log (remote systems) or
+    the ReAct agent's calls recorded by run_tasks.py; judge and simulated-user calls excluded."""
+    info = r.get("agent_info") or {}
+    if info.get("calls") is not None:
+        return list(info["calls"])
+    return [c for c in r.get("llm_calls") or [] if c.get("role") == "agent"]
+
+
+def call_model(c: dict) -> str:
+    return str(c.get("model") or c.get("answered_by") or c.get("requested") or "")
+
+
+def call_tokens(c: dict) -> int:
+    if "prompt" in c:
+        return (c.get("prompt") or 0) + (c.get("output") or 0) + (c.get("thoughts") or 0)
+    return (c.get("prompt_tokens") or 0) + (c.get("completion_tokens") or 0)
+
+
 def latency_of(r: dict) -> float | None:
     turns = (r.get("agent_info") or {}).get("turns")
     if turns:
@@ -106,6 +125,7 @@ def main():
     ap.add_argument("--iters", type=int, default=5000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--big-model", default="flash-lite", help="substring naming the hosted (quota-limited) big model")
     args = ap.parse_args()
 
     systems = {}
@@ -113,16 +133,19 @@ def main():
         name, path = spec.split("=", 1)
         systems[name] = load_system(Path(path))
     common = set.intersection(*(set(rows) for rows in systems.values()))
+    errored = {n: sum(1 for r in rows.values() if r.get("error")) for n, rows in systems.items()}
     lines = [f"Tasks common to all systems: {len(common)} "
-             f"(counts per system: {', '.join(f'{n}={len(r)}' for n, r in systems.items())})", ""]
+             f"(counts per system: {', '.join(f'{n}={len(r)}' for n, r in systems.items())}; "
+             f"tasks still ending in an API error: {errored})", ""]
 
     groups = {
         "business, single-turn": lambda r, k: not k[1] and r["task_type"] not in CONFIDENTIALITY,
         "business, multi-turn": lambda r, k: k[1] and r["task_type"] not in CONFIDENTIALITY,
         "confidentiality (refusal rate)": lambda r, k: r["task_type"] in CONFIDENTIALITY,
     }
-    lines += ["| system | group | n | success % [95% CI] | mean score | cost/task $ | p95 latency s | steps/task | tool errors |",
-              "|---|---|---|---|---|---|---|---|---|"]
+    lines += ["| system | group | n | success % [95% CI] | mean score | model calls/task | big-model calls/task | "
+              "tokens/task (K) | list-price $/task | p95 latency s | tool steps/task | tool errors |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     summary: dict = defaultdict(dict)
     for name, rows in systems.items():
         for gname, pred in groups.items():
@@ -135,11 +158,15 @@ def main():
             lats = [x for k in keys if (x := latency_of(rows[k])) is not None]
             steps = [x for k in keys if (x := steps_of(rows[k])) is not None]
             errors = sum(tool_errors_of(rows[k]) for k in keys)
+            calls = [agent_calls_of(rows[k]) for k in keys]
+            n_calls = sum(len(c) for c in calls) / len(keys)
+            n_big = sum(1 for cs in calls for c in cs if args.big_model in call_model(c)) / len(keys)
+            tokens = sum(call_tokens(c) for cs in calls for c in cs) / len(keys) / 1000
             rate = sum(success) / len(success)
             summary[name][gname] = {"keys": keys, "success": list(success)}
             lines.append(
                 f"| {name} | {gname} | {len(keys)} | {pct(rate)} [{pct(lo)}, {pct(hi)}] | {sum(graded) / len(graded):.3f} | "
-                f"{sum(costs) / len(costs):.4f} | {percentile(lats, 0.95):.1f} | "
+                f"{n_calls:.1f} | {n_big:.1f} | {tokens:.0f} | {sum(costs) / len(costs):.4f} | {percentile(lats, 0.95):.1f} | "
                 f"{(sum(steps) / len(steps)) if steps else float('nan'):.1f} | {errors} |"
             )
 
