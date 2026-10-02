@@ -48,6 +48,26 @@ def test_daily_quota_stops_the_run(monkeypatch):
 
 def test_oversized_request_is_not_retried(monkeypatch):
     calls = fake_litellm(monkeypatch, [RuntimeError("RateLimitError: Request too large ... please reduce your message size")])
-    with pytest.raises(RuntimeError):
+    with pytest.raises(utils.RequestTooLarge):
         utils.completion_with_retry("agent", model="groq/openai/gpt-oss-120b", messages=[])
     assert len(calls) == 1
+
+
+def test_retry_wait_respects_configured_budget(monkeypatch):
+    fake_litellm(monkeypatch, [RuntimeError("503 UNAVAILABLE"), RuntimeError("503 UNAVAILABLE")])
+    monkeypatch.setenv("CRMARENA_MAX_RETRY_WAIT_S", "1")
+    waits = []
+    monkeypatch.setattr(utils._time, "sleep", waits.append)
+    with pytest.raises(RuntimeError, match="UNAVAILABLE"):
+        utils.completion_with_retry("agent", model="fixed/model", messages=[])
+    assert sum(waits) == 1
+
+
+def test_missing_remote_price_is_unknown_but_local_api_charge_is_zero(monkeypatch):
+    fake_litellm(monkeypatch, [])
+    utils.completion_with_retry("agent", model="unknown/provider-model", messages=[])
+    assert utils.CALLS[-1]["cost_usd"] is None
+    assert utils.CALLS[-1]["cost_complete"] is False
+    utils.completion_with_retry("judge", model="ollama_chat/local-model", messages=[])
+    assert utils.CALLS[-1]["cost_usd"] == 0
+    assert utils.CALLS[-1]["cost_complete"] is True

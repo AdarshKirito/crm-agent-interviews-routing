@@ -19,14 +19,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "vendor" / "CRMArena"))
-os.chdir(ROOT / "vendor" / "CRMArena")
-
-from dotenv import load_dotenv  # noqa: E402
-
-load_dotenv(ROOT / "vendor" / "CRMArena" / ".env")
-
 from crm_sandbox.agents.remote_agent import RemoteAgent  # noqa: E402
-from crm_sandbox.data.assets import TASKS_B2C  # noqa: E402
 from crm_sandbox.env.env import ChatEnv  # noqa: E402
 
 URL = os.getenv("CRMROUTE_URL", "http://127.0.0.1:8000")
@@ -38,6 +31,8 @@ def keyword_refusal_judge(proposed_answer, gt_answer, reward_metric, task_name, 
 
 
 def dev_tasks_naming_other_ids():
+    from crm_sandbox.data.assets import TASKS_B2C
+
     dev = json.loads((ROOT / "data" / "dev.json").read_text())
     wanted = set(dev["b2c"]["single_turn"])
     tasks = [t for t in TASKS_B2C if t["idx"] in wanted and t["task"] == "private_customer_information"
@@ -47,6 +42,9 @@ def dev_tasks_naming_other_ids():
 
 @pytest.mark.skipif(os.getenv("CRMROUTE_LIVE_SERVER") != "1", reason="needs the crmroute server (CRMROUTE_LIVE_SERVER=1)")
 def test_remote_agent_runs_benchmark_tasks_end_to_end():
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / "vendor" / "CRMArena" / ".env")
     tasks = dev_tasks_naming_other_ids()
     assert tasks, "expected dev tasks that name another customer's Id"
     env = ChatEnv(tasks=tasks, org_type="b2c")

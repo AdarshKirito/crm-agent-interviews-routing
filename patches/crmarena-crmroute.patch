@@ -1,5 +1,5 @@
 diff --git a/crm_sandbox/agents/chat_agent.py b/crm_sandbox/agents/chat_agent.py
-index 59c7a8a..61bac1a 100644
+index 59c7a8a..386bf29 100644
 --- a/crm_sandbox/agents/chat_agent.py
 +++ b/crm_sandbox/agents/chat_agent.py
 @@ -5,7 +5,7 @@ litellm.set_verbose = False
@@ -11,7 +11,15 @@ index 59c7a8a..61bac1a 100644
  import together
  
  
-@@ -59,7 +59,8 @@ class ChatAgent:
+@@ -49,6 +49,7 @@ class ChatAgent:
+         self.max_turns = max_turns
+         self.strategy = strategy
+         self.info = {}
++        self.messages = []
+         self.usage = {"cost": [], "completion_tokens": [], "prompt_tokens": [], "total_tokens": []}
+         self.provider = provider
+        
+@@ -59,7 +60,8 @@ class ChatAgent:
              self.model = TOGETHER_MODELS_MAP[self.model]["name"]
          elif "vertex" in provider and self.model in VERTEX_MODELS_MAP:
              self.model = VERTEX_MODELS_MAP[self.model]["name"]
@@ -21,7 +29,7 @@ index 59c7a8a..61bac1a 100644
          else:
              pass
          if self.model in ["o1-mini", "o1-preview", "o1-2024-12-17", "o3-mini-2025-01-31"]:
-@@ -113,7 +114,7 @@ class ChatAgent:
+@@ -113,7 +115,7 @@ class ChatAgent:
          while current_agent_turn < self.max_turns:
              # sleep for non-openai models
              if self.provider != "openai":
@@ -30,7 +38,7 @@ index 59c7a8a..61bac1a 100644
              info = {}
              current_agent_turn += 1
              # turn off thinking for gemini 2.5 flash
-@@ -124,7 +125,7 @@ class ChatAgent:
+@@ -124,7 +126,7 @@ class ChatAgent:
              else:
                  thinking = None
              
@@ -39,7 +47,7 @@ index 59c7a8a..61bac1a 100644
                  messages=self.messages,
                  model=self.model,
                  temperature=0.0,
-@@ -134,10 +135,14 @@ class ChatAgent:
+@@ -134,10 +136,14 @@ class ChatAgent:
                  # custom_llm_provider=self.provider,
                  additional_drop_params=["temperature"] if self.original_model_name in ["o1-mini", "o1-preview", "o1-2024-12-17", "deepseek-r1", "o3-mini-2025-01-31"] else []
              )
@@ -54,12 +62,29 @@ index 59c7a8a..61bac1a 100644
              
              
              usage = res.usage
+@@ -146,7 +152,15 @@ class ChatAgent:
+                 if key != "cost":
+                     self.usage[key].append(usage.get(key, 0))
+ 
+-            self.usage["cost"].append(res._hidden_params["response_cost"])
++            cost = (getattr(res, "_hidden_params", None) or {}).get("response_cost")
++            if self.model.startswith("ollama"):
++                cost = 0.0
++            self.usage["cost"].append(cost)
++            # Preserve all completed calls even if a later Salesforce/model request
++            # fails. Missing prices are unknown, never a claim of free inference.
++            self.info["usage"] = self.usage
++            self.info["cost_complete"] = all(cost is not None for cost in self.usage["cost"])
++            self.info["total_cost"] = sum(cost for cost in self.usage["cost"] if cost is not None)
+             action = self.message_action_parser(message, self.model)
+             print("User Turn:", env.current_user_turn, "Agent Turn:", current_agent_turn, "Agent:", message["content"].strip())
+             self.messages.append({"role": "assistant", "content": message["content"].strip()})
 diff --git a/crm_sandbox/agents/remote_agent.py b/crm_sandbox/agents/remote_agent.py
 new file mode 100644
-index 0000000..b32a8d8
+index 0000000..088c406
 --- /dev/null
 +++ b/crm_sandbox/agents/remote_agent.py
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,177 @@
 +"""Evaluate an agent served by `adk api_server` (or the agents-cli FastAPI app).
 +
 +The benchmark keeps its own environment, simulated user and graders. This adapter
@@ -139,19 +164,28 @@ index 0000000..b32a8d8
 +        )
 +        res.raise_for_status()
 +        events = res.json()
-+        return self._final_text(events), events
++        if not isinstance(events, list) or any(not isinstance(event, dict) for event in events):
++            raise RuntimeError("Remote /run returned an invalid event list")
++        for event in events:
++            if event.get("errorCode") or event.get("error_code"):
++                raise RuntimeError(f"Remote agent error: {event.get('errorMessage') or event.get('error_message') or event.get('errorCode')}")
++        answer = self._final_text(events)
++        if not answer.strip():
++            raise RuntimeError("Remote /run completed without a final response")
++        return answer, events
 +
 +    @staticmethod
 +    def _final_text(events: List[Dict[str, Any]]) -> str:
 +        # The workflow's last node writes its reply to state as crm_final_response.
 +        for event in reversed(events):
 +            delta = (event.get("actions") or {}).get("stateDelta") or {}
-+            if isinstance(delta.get("crm_final_response"), str):
++            if isinstance(delta.get("crm_final_response"), str) and delta["crm_final_response"].strip():
 +                return delta["crm_final_response"]
 +        for event in reversed(events):
-+            for part in reversed((event.get("content") or {}).get("parts") or []):
-+                if part.get("text") and not part.get("thought"):
-+                    return part["text"]
++            parts = (event.get("content") or {}).get("parts") or []
++            text = "".join(part["text"] for part in parts if part.get("text") and not part.get("thought"))
++            if text:
++                return text
 +        return ""
 +
 +    @staticmethod
@@ -165,11 +199,13 @@ index 0000000..b32a8d8
 +                response = part.get("functionResponse")
 +                if response:
 +                    body = response.get("response") or {}
-+                    if body.get("isError") or body.get("error"):
++                    if isinstance(body, dict) and (body.get("isError") or body.get("error")):
 +                        tool_errors += 1
 +        return {"events": len(events), "tool_calls": tool_calls, "tool_errors": tool_errors, "authors": authors}
 +
 +    def act(self, env, index=None):
++        self.messages = []
++        self.info = {"turns": []}
 +        query, metadata = env.reset(task_index=index)
 +        metadata = metadata or {}
 +        session_id = f"crmarena-{self.org_type}-{index}-{uuid.uuid4().hex[:8]}"
@@ -183,21 +219,39 @@ index 0000000..b32a8d8
 +                "crm_extra_context": (metadata.get("optional") or "") if self.eval_mode == "aided" else "",
 +            },
 +        )
-+        self.messages = []
-+        self.info = {"session_id": session_id, "turns": []}
++        self.info["session_id"] = session_id
 +        observation, reward, done, turns = query, 0, False, 0
 +        # One reply per user message; the environment decides when the task ends.
-+        while not done and turns <= self.max_user_turns:
-+            turns += 1
-+            start = time.time()
-+            answer, events = self._run_turn(session_id, observation)
-+            latency = time.time() - start
-+            self.messages.append({"role": "user", "content": observation})
-+            self.messages.append({"role": "assistant", "content": answer})
-+            self.info["turns"].append({"latency_s": round(latency, 3), **self._summarize(events)})
-+            observation, reward, done, info = env.step({"name": "respond", "content": answer})
-+            if "end_reason" in info:
-+                self.info["end_reason"] = info["end_reason"]
++        failed = False
++        try:
++            while not done and turns <= self.max_user_turns:
++                turns += 1
++                # Include the failed request in the trajectory if /run raises.
++                self.messages.append({"role": "user", "content": observation})
++                start = time.monotonic()
++                answer, events = self._run_turn(session_id, observation)
++                latency = time.monotonic() - start
++                self.messages.append({"role": "assistant", "content": answer})
++                self.info["turns"].append({"latency_s": round(latency, 3), **self._summarize(events)})
++                observation, reward, done, info = env.step({"name": "respond", "content": answer})
++                if "end_reason" in info:
++                    self.info["end_reason"] = info["end_reason"]
++        except BaseException:
++            failed = True
++            raise
++        finally:
++            self.info["num_turns"] = (env.current_user_turn, turns)
++            try:
++                self._capture_state(session_id)
++            except Exception as error:
++                self.info["state_error"] = str(error)
++                if not failed:
++                    raise
++            finally:
++                self.http.close()
++        return reward
++
++    def _capture_state(self, session_id: str) -> None:
 +        state = self._get_state(session_id)
 +        usage = state.get("crm_usage") or {}
 +        self.info["usage"] = usage
@@ -205,13 +259,11 @@ index 0000000..b32a8d8
 +        self.info["calls"] = state.get("crm_calls") or []  # every agent model call, with the model that answered
 +        self.info["route"] = state.get("crm_route")
 +        self.info["guard"] = state.get("crm_guard")
-+        self.info["num_turns"] = (env.current_user_turn, turns)
-+        return reward
 +
 +    def get_messages(self) -> List[Dict[str, str]]:
 +        return self.messages
 diff --git a/crm_sandbox/agents/utils.py b/crm_sandbox/agents/utils.py
-index e1b972b..f11c85f 100644
+index e1b972b..dc8d614 100644
 --- a/crm_sandbox/agents/utils.py
 +++ b/crm_sandbox/agents/utils.py
 @@ -1,3 +1,4 @@
@@ -219,7 +271,7 @@ index e1b972b..f11c85f 100644
  import re
  import string
  from collections import Counter
-@@ -89,9 +90,150 @@ VERTEX_MODELS_MAP = {
+@@ -89,9 +90,159 @@ VERTEX_MODELS_MAP = {
    },
    "gemini-2.0-flash-001":{
          "name": "vertex_ai/gemini-2.0-flash-001"
@@ -335,11 +387,13 @@ index e1b972b..f11c85f 100644
 +            res = litellm.completion(**kwargs)
 +        except Exception as err:
 +            kind = classify_error(err)
++            if kind == "too_large":
++                raise RequestTooLarge(str(err)) from err
 +            if kind == "daily":
 +                raise QuotaExhausted(f"QUOTA_EXHAUSTED {role} {kwargs.get('model')}: {str(err)[:300]}") from err
 +            if kind not in ("rate", "unavailable") or waited >= max_wait:
 +                raise
-+            delay = (_retry_after(err) or min(60.0, 4.0 * 2 ** attempt)) + _random.uniform(0, 1.5)
++            delay = min(max_wait - waited, (_retry_after(err) or min(60.0, 4.0 * 2 ** min(attempt, 10))) + _random.uniform(0, 1.5))
 +            reason = re.search(r"Quota exceeded for metric: \S+?/(\w+)", str(err))
 +            print(f"[retry] {role} {kwargs.get('model')}: {kind}{' (' + reason.group(1) + ')' if reason else ''}; "
 +                  f"waiting {delay:.1f}s", flush=True)
@@ -348,6 +402,10 @@ index e1b972b..f11c85f 100644
 +            attempt += 1
 +            continue
 +        usage = getattr(res, "usage", None)
++        cost = (getattr(res, "_hidden_params", None) or {}).get("response_cost")
++        local = str(kwargs.get("model", "")).startswith("ollama") or str(kwargs.get("custom_llm_provider") or "").startswith("ollama")
++        if local and usage is not None:
++            cost = 0.0  # local inference has no API charge; hardware costs are excluded
 +        record = {
 +            "role": role,
 +            "requested": kwargs.get("model"),
@@ -358,6 +416,9 @@ index e1b972b..f11c85f 100644
 +            "attempts": attempt + 1,
 +            "waited_s": round(waited, 1),
 +            "seconds": round(_time.time() - start, 2),
++            "cost_usd": cost if usage is not None else None,
++            "cost_complete": cost is not None and usage is not None,
++            "cost_status": "missing_usage" if usage is None else ("local" if local else ("priced" if cost is not None else "unpriced")),
 +        }
 +        CALLS.append(record)
 +        log_path = os.getenv("CRMARENA_CALL_LOG")
@@ -371,10 +432,37 @@ index e1b972b..f11c85f 100644
  def parse_wrapped_response(reg_exp, text_phrase):
      match = re.search(reg_exp, text_phrase, re.DOTALL)
 diff --git a/crm_sandbox/env/connect_sandbox.py b/crm_sandbox/env/connect_sandbox.py
-index f6f31e0..72c9b6b 100644
+index f6f31e0..f5e6beb 100644
 --- a/crm_sandbox/env/connect_sandbox.py
 +++ b/crm_sandbox/env/connect_sandbox.py
-@@ -65,7 +65,8 @@ class SalesforceConnector:
+@@ -1,4 +1,5 @@
+ from simple_salesforce import Salesforce
++from simple_salesforce.exceptions import SalesforceMalformedRequest
+ import ast
+ import os, re, pandas as pd
+ from tqdm import tqdm
+@@ -47,11 +48,15 @@ class SalesforceConnector:
+                 result = self.sf.query_all(query)
+             else:
+                 result = self.sf.search(query)
+-        except Exception as e:
+-            e = str(e)
+-            e = ast.literal_eval(e.split("Response content:")[1].strip())[0]
+-            err = f"{e['errorCode']}: {e['message']}"
+-            return err, 0
++        except SalesforceMalformedRequest as error:
++            # Only malformed queries are observations the solver can correct.
++            # DNS, auth, quota and service failures must propagate to the resumable
++            # harness instead of being masked by parsing a non-Salesforce error.
++            content = error.content
++            if isinstance(content, list) and content and isinstance(content[0], dict):
++                detail = content[0]
++                return f"{detail.get('errorCode', 'MALFORMED_QUERY')}: {detail.get('message', '')}", 0
++            raise
+         
+         if not is_sosl:
+             result_data = result["records"]
+@@ -65,7 +70,8 @@ class SalesforceConnector:
              if "attributes" in row:
                  del row["attributes"]
  
@@ -511,7 +599,7 @@ index 41d331d..ac1ab24 100644
          if "yes" in res.choices[0].message.content.strip().lower() :
              return 1
 diff --git a/crm_sandbox/env/users.py b/crm_sandbox/env/users.py
-index cbcb371..786adac 100644
+index cbcb371..d110d14 100644
 --- a/crm_sandbox/env/users.py
 +++ b/crm_sandbox/env/users.py
 @@ -1,5 +1,6 @@
@@ -521,8 +609,13 @@ index cbcb371..786adac 100644
  
  class LLMUserSimulationEnv(object):
      def __init__(self, model: str, provider: str) -> None:
-@@ -11,12 +12,13 @@ class LLMUserSimulationEnv(object):
-         self.reset()
+@@ -8,15 +9,17 @@ class LLMUserSimulationEnv(object):
+         self.model = model
+         self.provider = provider
+         self.total_cost = 0.0
+-        self.reset()
++        # The first user utterance belongs to reset(task), where its usage is recorded.
++        # Generating a dummy greeting here spends an otherwise unaccounted model call.
  
      def generate_next_message(self, messages: List[Dict[str, Any]]) -> str:
 -        res = completion(
@@ -539,7 +632,7 @@ index cbcb371..786adac 100644
  
      def build_system_prompt(self, instruction: Optional[str], persona: Optional[str]) -> str:
 diff --git a/run_tasks.py b/run_tasks.py
-index a5616fe..eedc51f 100644
+index a5616fe..c5b4b30 100644
 --- a/run_tasks.py
 +++ b/run_tasks.py
 @@ -1,7 +1,9 @@
@@ -552,10 +645,55 @@ index a5616fe..eedc51f 100644
  from crm_sandbox.data.assets import TASKS_ORIGINAL, SCHEMA_ORIGINAL, TASKS_B2B, TASKS_B2B_INTERACTIVE, TASKS_B2C, TASKS_B2C_INTERACTIVE, B2B_SCHEMA, B2C_SCHEMA, EXTERNAL_FACING_TASKS
  from crm_sandbox.env.env import ChatEnv, ToolEnv, InteractiveChatEnv
  from crm_sandbox.env import TOOLS, TOOLS_FULL
-@@ -13,7 +15,9 @@ import time
+@@ -9,11 +11,52 @@ import traceback
+ import argparse
+ from datetime import datetime
+ import time
++import hashlib
++from pathlib import Path
++import tempfile
++
++
++def atomic_json(path, value):
++    """Never truncate a useful checkpoint if a process stops during a write."""
++    path = Path(path)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
++                                     prefix=path.name + ".", suffix=".tmp", delete=False) as output:
++        temporary = output.name
++        try:
++            json.dump(value, output, indent=2)
++            output.flush()
++            os.fsync(output.fileno())
++        except BaseException:
++            output.close()
++            os.unlink(temporary)
++            raise
++    try:
++        os.replace(temporary, path)
++    finally:
++        if os.path.exists(temporary):
++            os.unlink(temporary)
++
++
++def run_configuration(selected_tasks):
++    """Pins checked before reusing a checkpoint, including the actual task content."""
++    names = ("model", "agent_strategy", "org_type", "interactive", "agent_eval_mode",
++             "llm_provider", "privacy_aware_prompt", "judge_model", "judge_provider",
++             "user_model", "user_provider", "max_turns", "max_user_turns", "remote_app")
++    pins = {name: getattr(args, name) for name in names}
++    pins["tasks_sha256"] = hashlib.sha256(json.dumps(selected_tasks, sort_keys=True).encode()).hexdigest()
++    pins["generation"] = {key: os.getenv(key, default) for key, default in {
++        "CRMARENA_THINKING_LEVEL": "low", "CRMARENA_MAX_TOKENS": "8192",
++        "CRMARENA_OLLAMA_NUM_CTX": "16384", "CRMARENA_MAX_REQUEST_TOKENS": "250000",
++        "GOOGLE_CLOUD_PROJECT": "", "GOOGLE_CLOUD_LOCATION": "",
++        "CRMARENA_RUN_FINGERPRINT": "",
++    }.items()}
++    return pins
+ 
  def run():
-     if not os.path.exists(args.log_dir):
-         os.makedirs(args.log_dir)
+-    if not os.path.exists(args.log_dir):
+-        os.makedirs(args.log_dir)
 -    ckpt_path = f"{args.log_dir}/results_{args.model}_{args.agent_strategy}_{args.task_category}.json"
 +    mode_suffix = "_interactive" if args.interactive else ""
 +    safe_model = args.model.replace("/", "_").replace(":", "_")  # provider/model:tag strings
@@ -563,36 +701,69 @@ index a5616fe..eedc51f 100644
      if args.org_type == "b2b":
          TASKS_NATURAL = TASKS_B2B_INTERACTIVE if args.interactive else TASKS_B2B
          SCHEMA = B2B_SCHEMA
-@@ -31,6 +35,13 @@ def run():
+@@ -31,23 +74,65 @@ def run():
          selected_tasks = [task for task in TASKS_NATURAL if task["task"] in args.task_category.split(",")]
      else:
          selected_tasks = [task for task in TASKS_NATURAL if task["task"] == args.task_category]
+-        
 +
 +    if args.task_ids_file:
 +        # fixed task lists (dev.json / test.json) written by scripts/make_splits.py
 +        with open(args.task_ids_file) as f:
 +            id_lists = json.load(f)
-+        wanted = set(id_lists.get(args.org_type, {}).get("multi_turn" if args.interactive else "single_turn", []))
++        requested = id_lists.get(args.org_type, {}).get("multi_turn" if args.interactive else "single_turn", [])
++        wanted = set(requested)
++        if len(wanted) != len(requested):
++            raise ValueError("Duplicate task IDs in the selected split")
++        missing = wanted - {task["idx"] for task in TASKS_NATURAL}
++        if missing:
++            raise ValueError(f"Unknown task IDs in the selected split: {sorted(missing)}")
 +        selected_tasks = [task for task in selected_tasks if task["idx"] in wanted]
-         
-     # Load checkpoint if it exists
-     completed_tasks = {}
-@@ -38,16 +49,23 @@ def run():
-     if os.path.exists(ckpt_path):
-         if args.reuse_results:
-             with open(ckpt_path, 'r') as f:
--                completed_tasks = {task['task_id']: task for task in json.load(f)}
-+                # tasks that ended in an API error are run again on resume
-+                completed_tasks = {task['task_id']: task for task in json.load(f) if not task.get("error")}
-         else:
-             os.remove(ckpt_path)
-             
-     print(f"Loaded {len(selected_tasks)} tasks")
++
++    print(f"Loaded {len(selected_tasks)} tasks")
 +    if args.dry_run or not selected_tasks:
 +        from collections import Counter
 +        print("task types:", dict(Counter(task["task"] for task in selected_tasks)))
 +        print("task ids:", [task["idx"] for task in selected_tasks])
-+        return
++        return 0
++    if args.max_consecutive_errors < 1:
++        raise ValueError("max_consecutive_errors must be positive")
++    if len({task["idx"] for task in selected_tasks}) != len(selected_tasks):
++        raise ValueError("Dataset contains duplicate task IDs")
++
++    os.makedirs(args.log_dir, exist_ok=True)
++    pins = run_configuration(selected_tasks)
++    config_path = str(Path(ckpt_path).with_name("config_" + Path(ckpt_path).name))
+     # Load checkpoint if it exists
+     completed_tasks = {}
+-    
++    checkpoint_rows = []
+     if os.path.exists(ckpt_path):
+         if args.reuse_results:
++            if not os.path.exists(config_path):
++                raise ValueError("Checkpoint has no configuration pins. Preserve this legacy run and use a new log_dir.")
++            with open(config_path, encoding="utf-8") as f:
++                previous = json.load(f)
++            if previous != pins:
++                changed = [key for key in pins if previous.get(key) != pins[key]]
++                raise ValueError(f"Checkpoint configuration changed ({', '.join(changed)}); use a new log_dir.")
+             with open(ckpt_path, 'r') as f:
+-                completed_tasks = {task['task_id']: task for task in json.load(f)}
++                # tasks that ended in an API error are run again on resume
++                checkpoint_rows = json.load(f)
++            seen = [row["task_id"] for row in checkpoint_rows]
++            if len(set(seen)) != len(seen) or set(seen) - {task["idx"] for task in selected_tasks}:
++                raise ValueError("Checkpoint contains duplicate or unexpected task IDs")
++            completed_tasks = {task['task_id']: task for task in checkpoint_rows if not task.get("error")}
+         else:
+-            os.remove(ckpt_path)
+-            
+-    print(f"Loaded {len(selected_tasks)} tasks")
++            raise ValueError("Checkpoint already exists; use --reuse_results or a new log_dir to preserve it.")
++    atomic_json(config_path, pins)
++    if len(completed_tasks) == len(selected_tasks):
++        print("All selected tasks are already complete.")
++        return 0
      start_time = datetime.now()
      print(f"Starting evaluation at {start_time}")
      selected_tasks = {t['idx']: t for t in selected_tasks}
@@ -603,7 +774,7 @@ index a5616fe..eedc51f 100644
          if args.interactive:
              if args.agent_strategy == "act":
                  raise ValueError(
-@@ -56,9 +74,10 @@ def run():
+@@ -56,9 +141,10 @@ def run():
                  )
              # This implies agent_strategy is "react" if interactive is True
              
@@ -616,7 +787,7 @@ index a5616fe..eedc51f 100644
      elif args.agent_strategy == "tool_call":
          if args.interactive:
              raise NotImplementedError(
-@@ -84,6 +103,7 @@ def run():
+@@ -84,6 +170,7 @@ def run():
      else:
          # Fallback for unknown strategies, though argparse choices should prevent this.
          raise ValueError(f"Unsupported agent_strategy: {args.agent_strategy}")
@@ -624,7 +795,7 @@ index a5616fe..eedc51f 100644
      for idx, task in selected_tasks.items():
          # Skip tasks that have already been completed
          if idx in completed_tasks:
-@@ -93,7 +113,17 @@ def run():
+@@ -93,7 +180,17 @@ def run():
              agent_type = "external"
          else:
              agent_type = "internal"
@@ -639,21 +810,22 @@ index a5616fe..eedc51f 100644
 +                interactive=args.interactive,
 +                max_user_turns=args.max_user_turns,
 +            )
-+        elif args.agent_strategy in ["react"]:
++        elif args.agent_strategy in ["react", "act"]:
              agent = ChatAgent(
                  model=args.model,
                  schema_obj=SCHEMA,
-@@ -117,6 +147,9 @@ def run():
+@@ -117,6 +214,10 @@ def run():
                  provider=args.llm_provider
              )
          print(f"Running task {idx}")
 +        agent_utils.CALLS.clear()
-+        judge_cost_before = env.evaluator.total_cost
++        judge_cost_before = getattr(getattr(env, "evaluator", None), "total_cost", 0.0)
 +        user_cost_before = env.user.total_cost if hasattr(env, "user") else 0.0
++        quota_exhausted = False
          try:
              reward = agent.act(
                  env,
-@@ -125,6 +158,8 @@ def run():
+@@ -125,6 +226,8 @@ def run():
              result = {
                  "task_id": idx,
                  "task_type": task["task"],
@@ -662,13 +834,13 @@ index a5616fe..eedc51f 100644
                  "gt_answer": task["answer"],
                  "reward": reward,
                  "agent_info": agent.info,
-@@ -132,17 +167,29 @@ def run():
+@@ -132,31 +235,59 @@ def run():
              }
          except Exception as e:
              traceback.print_exc()
 +            if isinstance(e, agent_utils.QuotaExhausted) or "QUOTA_EXHAUSTED" in str(e):
 +                print(f"Daily quota used up ({e}). Stopping; rerun with --reuse_results to resume.")
-+                break
++                quota_exhausted = True
              result = {
                  "task_id": idx,
                  "task_type": task["task"],
@@ -679,27 +851,42 @@ index a5616fe..eedc51f 100644
 +                # API errors are rerun on resume; a request too large for the model's quota or
 +                # context is the system's own failure (reward 0, as upstream scores exceptions)
 +                "error": not isinstance(e, agent_utils.RequestTooLarge),
-+                "failure": "request_too_large" if isinstance(e, agent_utils.RequestTooLarge) else "api_error",
++                "failure": "quota_exhausted" if quota_exhausted else ("request_too_large" if isinstance(e, agent_utils.RequestTooLarge) else "api_error"),
                  "agent_info": {
++                    **getattr(agent, "info", {}),
                      "source": "api",
                      "content": "Error: " + str(e)
                  },
-                 "traj": agent.get_messages(),
+-                "traj": agent.get_messages(),
++                "traj": getattr(agent, "messages", []),
              }
 +        result["llm_calls"] = list(agent_utils.CALLS)  # judge, simulated user and ReAct calls with the answering model
-+        result["judge_cost"] = env.evaluator.total_cost - judge_cost_before
++        result["judge_cost_complete"] = all(call.get("cost_complete", False) for call in agent_utils.CALLS if call["role"] == "judge")
++        result["user_sim_cost_complete"] = all(call.get("cost_complete", False) for call in agent_utils.CALLS if call["role"] == "user_sim")
++        result["judge_cost"] = getattr(getattr(env, "evaluator", None), "total_cost", 0.0) - judge_cost_before
 +        result["user_sim_cost"] = (env.user.total_cost if hasattr(env, "user") else 0.0) - user_cost_before
          print(
              "✅" if result["reward"] == 1 else "❌",
              f"task_id={idx}"
-@@ -151,9 +198,13 @@ def run():
-         data_res = []
-         if os.path.exists(ckpt_path):
-             with open(ckpt_path, "r") as f:
+         )
+         print("-----")
+-        data_res = []
+-        if os.path.exists(ckpt_path):
+-            with open(ckpt_path, "r") as f:
 -                data_res = json.load(f)
-+                data_res = [r for r in json.load(f) if r["task_id"] != idx]  # replace an earlier errored attempt
-         with open(ckpt_path, "w") as f:
-             json.dump(data_res + [result], f, indent=2)
+-        with open(ckpt_path, "w") as f:
+-            json.dump(data_res + [result], f, indent=2)
++        previous_attempt = next((r for r in checkpoint_rows if r["task_id"] == idx), None)
++        if previous_attempt:
++            result["previous_attempts"] = previous_attempt.get("previous_attempts", []) + [
++                {key: value for key, value in previous_attempt.items() if key != "previous_attempts"}
++            ]
++        checkpoint_rows = [r for r in checkpoint_rows if r["task_id"] != idx] + [result]
++        atomic_json(ckpt_path, checkpoint_rows)
++        if not result.get("error"):
++            completed_tasks[idx] = result
++        if quota_exhausted:
++            break
 +        consecutive_errors = consecutive_errors + 1 if result.get("error") else 0
 +        if consecutive_errors >= args.max_consecutive_errors:
 +            print(f"{consecutive_errors} tasks in a row ended in errors; stopping. Fix the cause and resume with --reuse_results.")
@@ -707,7 +894,14 @@ index a5616fe..eedc51f 100644
          time.sleep(1)
      end_time = datetime.now()
      print(f"Finished evaluation at {end_time}")
-@@ -172,7 +223,7 @@ if __name__ == "__main__":
++    pending = len(selected_tasks) - len(completed_tasks)
++    if pending:
++        print(f"Incomplete evaluation: {pending} selected tasks need a successful execution. Resume with the same configuration.")
++    return 1 if pending else 0
+     
+ if __name__ == "__main__":
+     load_dotenv()
+@@ -172,7 +303,7 @@ if __name__ == "__main__":
          "--agent_strategy",
          type=str,
          default="react",
@@ -716,7 +910,7 @@ index a5616fe..eedc51f 100644
      )
      parser.add_argument(
          "--agent_eval_mode",
-@@ -184,7 +235,7 @@ if __name__ == "__main__":
+@@ -184,7 +315,7 @@ if __name__ == "__main__":
          "--llm_provider",
          type=str,
          default="bedrock",
@@ -725,7 +919,7 @@ index a5616fe..eedc51f 100644
      )
      parser.add_argument(
          "--task_category",
-@@ -235,6 +286,20 @@ if __name__ == "__main__":
+@@ -235,8 +366,21 @@ if __name__ == "__main__":
          help="Whether to use a privacy-aware prompt. Accepts 'true' or 'false'. (default: %(default)s)"
      )
      parser.add_argument("--log_dir", type=str, default="logs")
@@ -746,3 +940,7 @@ index a5616fe..eedc51f 100644
      args = parser.parse_args()
      print(args)
  
+-    run()
+-    
+\ No newline at end of file
++    raise SystemExit(run())
