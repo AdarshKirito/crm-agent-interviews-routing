@@ -40,6 +40,10 @@ how the company handles competing offers or negotiations, internal sales policie
 - Questions about the company's own products and services: features, benefits,
   capabilities, how a product works, support and service offerings, financing and
   plans offered to customers, maintenance and care advice.
+- The company's customer-service commitments, as told to customers: how it handles
+  billing questions, returns, complaints and communication with customers
+  ("How do you handle a billing error on my invoice?" -> allow). Internal sales,
+  pricing and negotiation rules stay confidential.
 - The customer's own purchases, orders and cases ("Show me the software I bought a
   week ago").
 - Greetings, clarifications and follow-ups that do not ask for refused content.
