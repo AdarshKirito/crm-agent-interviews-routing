@@ -66,7 +66,7 @@ What this shows:
 ## Dev: tuning and the routing fit
 
 Everything here is on dev tasks only (`data/dev_run.json`: all 220 dev single-turn tasks plus 20 of the
-76 dev multi-turn tasks, one per task type and org). Same pins as the test run below.
+76 dev multi-turn tasks, one per task type and org). Same pins as the test run above.
 
 - **Tuning** (`results/dev_tuning.md`). A diagnostic dev run found rules the agent got wrong. Each was
   checked against the live orgs on several dev tasks before it became a hint. The fixes: relative periods
