@@ -15,14 +15,20 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from analyze_results import CONFIDENTIALITY, load_system, score  # noqa: E402
+from analyze_results import CONFIDENTIALITY, expected_keys, load_system, score, validate_complete  # noqa: E402
 
 
-def rates(path: str, threshold: float) -> dict[str, list[float]]:
-    by_type = defaultdict(list)
-    for key, row in load_system(Path(path)).items():
-        by_type[row["task_type"]].append(score(row, threshold)[1])
-    return by_type
+def paired_rates(big: dict, small: dict, threshold: float) -> tuple[dict, dict]:
+    """Only paired completed dev tasks may decide which model is good enough."""
+    if not big or big.keys() != small.keys():
+        raise ValueError("routing needs matching nonempty task sets for both models")
+    validate_complete({"big": big, "small": small}, set(big))
+    by_big, by_small = defaultdict(list), defaultdict(list)
+    for key in sorted(big):
+        task_type = big[key]["task_type"]
+        by_big[task_type].append(score(big[key], threshold)[1])
+        by_small[task_type].append(score(small[key], threshold)[1])
+    return by_big, by_small
 
 
 def main():
@@ -33,8 +39,21 @@ def main():
     ap.add_argument("--min-n", type=int, default=8)
     ap.add_argument("--fuzzy-threshold", type=float, default=0.5)
     ap.add_argument("--out", default="agent/app/data/routing.yaml")
+    ap.add_argument("--dev-split", default="data/dev.json", type=Path)
+    ap.add_argument("--test-split", default="data/test.json", type=Path)
     args = ap.parse_args()
-    big, small = rates(args.big, args.fuzzy_threshold), rates(args.small, args.fuzzy_threshold)
+    if args.min_n < 1 or not 0 <= args.margin <= 100 or not 0 <= args.fuzzy_threshold <= 1:
+        ap.error("invalid sample count, margin or fuzzy threshold")
+    big_rows, small_rows = load_system(Path(args.big)), load_system(Path(args.small))
+    try:
+        validate_complete({"big": big_rows, "small": small_rows}, expected_keys(args.dev_split))
+        # Split IDs must be disjoint across modes, since single/multi share tasks.
+        held_out = {(org, tid) for org, _, tid in expected_keys(args.test_split)}
+        if any((org, tid) in held_out for org, _, tid in big_rows):
+            raise ValueError("held-out test tasks cannot be used to fit routing")
+        big, small = paired_rates(big_rows, small_rows, args.fuzzy_threshold)
+    except ValueError as exc:
+        ap.error(str(exc))
     tiers, stats = {}, {}
     for task_type in sorted(set(big) & set(small)):
         if task_type in CONFIDENTIALITY:
@@ -49,7 +68,7 @@ def main():
     doc = {
         "default": "big",
         "margin_points": args.margin,
-        "fitted_from": {"big": args.big, "small": args.small},
+        "fitted_from": {"big": args.big, "small": args.small, "dev_split": str(args.dev_split)},
         "tiers": tiers,
         "dev_stats": stats,
     }

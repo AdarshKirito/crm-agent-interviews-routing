@@ -19,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from analyze_results import CONFIDENTIALITY, load_system, score  # noqa: E402
+from analyze_results import CONFIDENTIALITY, expected_keys, load_system, score, validate_complete  # noqa: E402
 
 CASES = ROOT / "evals" / "ci_cases.json"
 BASELINE = ROOT / "evals" / "ci_baseline.json"
@@ -70,25 +70,56 @@ def run(out: str, url: str) -> None:
 
 def rates(run_dir: str) -> dict:
     rows = load_system(Path(run_dir))
+    validate_complete({"ci": rows}, expected_keys(CASES))
+    configurations = {}
+    for path in sorted(Path(run_dir).glob("results_*.json")):
+        sidecar = path.with_name("config_" + path.name)
+        if not sidecar.exists():
+            raise ValueError(f"missing run configuration: {sidecar.name}")
+        config = json.loads(sidecar.read_text(encoding="utf-8"))
+        required = ("model", "agent_strategy", "org_type", "interactive", "agent_eval_mode",
+                    "judge_model", "judge_provider", "user_model", "user_provider", "generation", "tasks_sha256")
+        if any(k not in config for k in required):
+            raise ValueError(f"incomplete run configuration: {sidecar.name}")
+        key = f"{config['org_type']}|{config['interactive']}"
+        if key in configurations:
+            raise ValueError(f"multiple configurations for {key}")
+        pins = {k: v for k, v in config.items() if k != "generation"}
+        # A PR intentionally changes source/image fingerprints, not model/evaluation pins.
+        pins["generation"] = {k: v for k, v in config["generation"].items() if k != "CRMARENA_RUN_FINGERPRINT"}
+        configurations[key] = pins
     business = [score(r, 0.5)[1] for r in rows.values() if r["task_type"] not in CONFIDENTIALITY]
     refusals = [score(r, 0.5)[1] for r in rows.values() if r["task_type"] in CONFIDENTIALITY]
     return {
         "n": len(rows),
+        "task_keys": [list(k) for k in sorted(rows)],
+        "configurations": configurations,
         "success_rate": sum(business) / len(business) if business else 0.0,
         "refusal_rate": sum(refusals) / len(refusals) if refusals else 0.0,
     }
 
 
 def compare(run_dir: str, update: bool, tolerance: float) -> int:
-    current = rates(run_dir)
+    try:
+        current = rates(run_dir)
+    except ValueError as exc:
+        print(f"FAIL: {exc}")
+        return 1
     print("current:", json.dumps(current))
-    if update or not BASELINE.exists():
+    if update:
         BASELINE.write_text(json.dumps(current, indent=1))
         print(f"baseline written to {BASELINE}")
         return 0
+    if not BASELINE.exists():
+        print("FAIL: no reviewed CI baseline; create one explicitly with --update-baseline after a complete run")
+        return 1
     base = json.loads(BASELINE.read_text())
     print("baseline:", json.dumps(base))
     failed = []
+    if base.get("task_keys") != current["task_keys"] or base.get("n") != current["n"]:
+        failed.append("baseline task identities differ; explicitly review and update the baseline")
+    if base.get("configurations") != current["configurations"]:
+        failed.append("baseline model/evaluation configuration differs; rerun with the reviewed pins")
     for key in ("success_rate", "refusal_rate"):
         if current[key] < base[key] - tolerance:
             failed.append(f"{key} dropped from {base[key]:.2f} to {current[key]:.2f}")
