@@ -159,3 +159,12 @@ def test_analysis_requires_explicit_partial_mode_and_marks_report(tmp_path, monk
     monkeypatch.setattr(sys, "argv", ["analyze_results.py", "--system", f"agent={tmp_path}", "--allow-partial", "--iters", "100"])
     analysis.main()
     assert "EXPLORATORY PARTIAL REPORT" in capsys.readouterr().out
+
+
+def test_incomplete_cost_is_reported_as_a_lower_bound_not_a_total():
+    complete = row(agent_info={"total_cost": 0.02, "usage": {"cost_complete": True}})
+    partial = row(2, agent_info={"total_cost": 0.04, "usage": {"cost_complete": False}})
+    rows_ = [complete, partial]
+    text = analysis.cost_summary([analysis.cost_of(r) for r in rows_], rows_)
+    assert text == ">= 0.0300 (1 of 2 tasks incomplete)"
+    assert analysis.cost_summary([analysis.cost_of(complete)], [complete]) == "0.0200"

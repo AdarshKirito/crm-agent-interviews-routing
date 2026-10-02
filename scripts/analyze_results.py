@@ -90,6 +90,15 @@ def cost_of(r: dict) -> float | None:
     return float(cost) if cost is not None else None
 
 
+def cost_summary(costs: list[float | None], rows: list[dict]) -> str:
+    """Mean cost per task; with unknown usage or prices, the known part as a lower bound."""
+    if all(c is not None for c in costs):
+        return f"{sum(costs) / len(costs):.4f}"
+    known = [float((r.get("agent_info") or {}).get("total_cost") or 0.0) for r in rows]
+    incomplete = sum(c is None for c in costs)
+    return f">= {sum(known) / len(known):.4f} ({incomplete} of {len(costs)} tasks incomplete)"
+
+
 def agent_calls_of(r: dict) -> list[dict]:
     """The system's own model calls: the agent server's per-call log (remote systems) or
     the ReAct agent's calls recorded by run_tasks.py; judge and simulated-user calls excluded."""
@@ -216,7 +225,7 @@ def main():
             graded, success = zip(*(score(rows[k], args.fuzzy_threshold) for k in keys))
             lo, hi = bootstrap(list(success), args.iters, args.seed)
             costs = [cost_of(rows[k]) for k in keys]  # the system's own model spend; judge cost is reported by run_tasks separately
-            cost_text = f"{sum(costs) / len(costs):.4f}" if all(c is not None for c in costs) else "n/a (incomplete pricing)"
+            cost_text = cost_summary(costs, [rows[k] for k in keys])
             lats = [x for k in keys if (x := latency_of(rows[k])) is not None]
             steps = [x for k in keys if (x := steps_of(rows[k])) is not None]
             errors = sum(tool_errors_of(rows[k]) for k in keys)

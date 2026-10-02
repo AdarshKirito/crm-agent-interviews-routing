@@ -68,7 +68,7 @@ def main():
     doc = {
         "default": "big",
         "margin_points": args.margin,
-        "fitted_from": {"big": args.big, "small": args.small, "dev_split": str(args.dev_split)},
+        "fitted_from": {"big": args.big, "small": args.small, "dev_split": args.dev_split.as_posix()},
         "tiers": tiers,
         "dev_stats": stats,
     }
