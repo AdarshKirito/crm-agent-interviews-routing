@@ -1,4 +1,4 @@
-# One Cloud Run container: the ADK agent (port $PORT) plus its two MCP servers on
+# One container: the ADK agent (port $PORT) plus its two MCP servers on
 # localhost (Salesforce :3333, knowledge search :8765).
 # Build after exporting the knowledge articles (scripts/export_knowledge.py) so the
 # search index can be built into the image:

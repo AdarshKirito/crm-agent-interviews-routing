@@ -12,13 +12,20 @@ FASTMCP_SERVER_HOST=127.0.0.1 FASTMCP_SERVER_PORT=8765 FASTMCP_SERVER_LOG_LEVEL=
   /srv/search/.venv/bin/mcp-server-qdrant --transport streamable-http &
 
 /srv/agent/.venv/bin/python - <<'PY'
-import time, urllib.request
-for _ in range(60):
-    try:
-        urllib.request.urlopen("http://127.0.0.1:3333/healthz", timeout=1)
-        break
-    except OSError:
+import time, urllib.request, urllib.error
+for url, protocol in (("http://127.0.0.1:3333/healthz", False), ("http://127.0.0.1:8765/mcp", True)):
+    for attempt in range(60):
+        try:
+            with urllib.request.urlopen(url, timeout=1):
+                break
+        except urllib.error.HTTPError as error:
+            if protocol and error.code in (400, 405, 406):
+                break
+        except OSError:
+            pass
         time.sleep(0.5)
+    else:
+        raise SystemExit(f"Required MCP service did not become ready: {url}")
 PY
 
 cd /srv/agent

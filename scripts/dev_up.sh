@@ -17,7 +17,15 @@ export CRMROUTE_CALL_LOG="${CRMROUTE_CALL_LOG:-$LOGS/calls.jsonl}"
 PIDS=()
 trap 'for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done' EXIT
 
-up() { curl -s -m 2 -o /dev/null "$1"; }
+up() {
+  local status
+  status="$(curl -s -m 2 -o /dev/null -w '%{http_code}' "$1")" || return 1
+  if [[ "$1" == */mcp ]]; then
+    [[ "$status" == 200 || "$status" == 400 || "$status" == 405 || "$status" == 406 ]]
+  else
+    [[ "$status" == 2?? ]]
+  fi
+}
 
 if ! up http://127.0.0.1:3333/healthz; then
   (cd "$ROOT/mcp-salesforce" && SF_CACHE_DIR="$ROOT/data/cache/sf" node dist/index.js --http --port 3333 \
