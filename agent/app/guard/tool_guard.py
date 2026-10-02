@@ -7,6 +7,7 @@ tool results are kept as evidence for the checker and as notes for later turns.
 """
 
 import json
+import re
 from typing import Any
 
 from google.adk.tools import BaseTool, ToolContext
@@ -75,40 +76,75 @@ def before_tool(tool: BaseTool, args: dict[str, Any], tool_context: ToolContext)
     }
 
 
-def _filter_confidential_articles(response: dict) -> dict:
+def _knowledge_read(name: str, args: dict) -> bool:
+    return (name == "search_knowledge"
+            or name == "get_record" and str(args.get("object_name", "")).lower() == "knowledge__kav"
+            or name in ("soql_query", "sosl_search") and
+            bool(re.search(r"\bKnowledge__kav\b", str(args.get("query", "")), re.I)))
+
+
+def _filter_confidential_articles(response: dict, name: str = "search_knowledge") -> dict:
+    blocked = {"isError": True, "content": [{"type": "text", "text": (
+        "Knowledge results could not be checked for confidentiality. "
+        "Use search_knowledge, or include each article's Title in the requested fields.")}]}
     text = _text_of(response)
     try:
         payload = json.loads(text)
     except ValueError:
-        return response
-    articles = payload.get("articles") or []
+        return blocked
+    if not isinstance(payload, dict):
+        return blocked
+    key = "articles" if name == "search_knowledge" else "records"
+    articles = [payload] if name == "get_record" else payload.get(key)
+    if not isinstance(articles, list) or any(not isinstance(article, dict) for article in articles):
+        return blocked
     smap = load_map()
-    kept = [a for a in articles if not smap.is_confidential_article(a.get("Title"))]
+    kept = []
+    for article in articles:
+        # SOSL may also return public product records in the same search.
+        if name == "sosl_search" and article.get("_type") not in (None, "Knowledge__kav"):
+            kept.append(article)
+            continue
+        title = article.get("Title")
+        if isinstance(title, str) and title.strip() and not smap.is_confidential_article(title):
+            kept.append(article)
     if len(kept) == len(articles):
-        return response
-    payload["articles"] = kept
+        # Re-serialize even unchanged results: a structuredContent copy must not
+        # bypass the same checks as the text used for model evidence.
+        return {"content": [{"type": "text", "text": json.dumps(payload)}]}
+    if name == "get_record":
+        return {"isError": True, "content": [{"type": "text", "text": (
+            "This article is confidential or has no Title to verify. Its contents were withheld.")}]}
+    payload = dict(payload)
+    payload[key] = kept
     payload["returned"] = len(kept)
+    if "totalSize" in payload:
+        payload["totalSize"] = len(kept)
     payload["withheld_confidential"] = len(articles) - len(kept)
     payload["note"] = ("Some matching articles are internal and were withheld. If the question can only be "
                        "answered from internal material, refuse and say it is confidential.")
-    return {**response, "content": [{"type": "text", "text": json.dumps(payload)}]}
+    return {"content": [{"type": "text", "text": json.dumps(payload)}]}
 
 
 def after_tool(tool: BaseTool, args: dict[str, Any], tool_context: ToolContext, tool_response: Any) -> dict | None:
+    # Structured output is the model's own claim, not independent CRM evidence.
+    if tool.name == "set_model_response":
+        return None
     state = tool_context.state
     replaced = None
     if (
-        tool.name == "search_knowledge"
+        _knowledge_read(tool.name, args)
         and state.get(K.AUDIENCE) == "customer"
         and isinstance(tool_response, dict)
         and not _is_error(tool_response)
     ):
-        replaced = _filter_confidential_articles(tool_response)
+        replaced = _filter_confidential_articles(tool_response, tool.name)
         tool_response = replaced
     text = _text_of(tool_response)
 
-    evidence = (state.get(K.EVIDENCE) or "") + "\n" + text
-    state[K.EVIDENCE] = evidence[-MAX_EVIDENCE_CHARS:]
+    if not _is_error(tool_response):
+        evidence = (state.get(K.EVIDENCE) or "") + "\n" + text
+        state[K.EVIDENCE] = evidence[-MAX_EVIDENCE_CHARS:]
 
     notes = list(state.get(K.NOTES) or [])
     call = json.dumps(args, default=str)[:300]

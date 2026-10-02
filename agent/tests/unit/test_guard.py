@@ -55,6 +55,40 @@ def test_get_record_scoping():
     assert not smap.check_get_record("Quote", "0Q0Wt000001WRAzKAO", None, {SELF}).allowed
 
 
+def test_customer_scope_requires_an_ownership_filter():
+    smap = load_map()
+    for predicate in (
+        f"Id != '{SELF}'",
+        f"Id NOT IN ('{SELF}')",
+        f"Description = '{SELF}'",
+        f"NOT (Id = '{SELF}')",
+        f"Id IN ('{SELF}', '{OTHER}')",
+    ):
+        assert not smap.check_soql(f"SELECT Id FROM Contact WHERE {predicate}", {SELF}).allowed
+
+
+def test_explicit_positive_filters_keep_legitimate_scoped_queries_working():
+    smap = load_map()
+    assert smap.check_soql(f"SELECT Id FROM Contact WHERE Id IN ('{SELF}', '{SELF[:15]}')", {SELF}).allowed
+    assert smap.check_soql(
+        f"SELECT Id, Subject FROM Case WHERE ContactId = '{SELF}' AND Status = 'Closed' ORDER BY CreatedDate DESC LIMIT 5",
+        {SELF},
+    ).allowed
+    assert not smap.check_soql(f"SELECT Id FROM Contact WHERE Id = '{SELF_ACCOUNT}'", {SELF_ACCOUNT}).allowed
+    # An own Id only in a child predicate is not proof the parent rows are scoped.
+    assert not smap.check_soql(
+        f"SELECT Id, (SELECT Id FROM Contacts WHERE Id = '{SELF}') FROM Account", {SELF},
+    ).allowed
+
+
+def test_customer_cannot_fetch_internal_fields_indirectly():
+    smap = load_map()
+    own_case = "500Wt00000ABCdeIAH"
+    assert not smap.check_get_record("Case", own_case, None, {SELF, own_case}).allowed
+    assert not smap.check_get_record("Case", own_case, ["Id", "Owner.Name"], {SELF, own_case}).allowed
+    assert not smap.check_soql(f"SELECT FIELDS(ALL) FROM Case WHERE ContactId = '{SELF}'", {SELF}).allowed
+
+
 def test_confidential_articles_and_request_terms():
     smap = load_map()
     assert smap.is_confidential_article("Competitor: Quantum Circuits Inc")

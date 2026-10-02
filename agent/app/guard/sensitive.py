@@ -27,6 +27,17 @@ _SOQL_WORDS = {
     "HOUR_IN_DAY", "FISCAL_YEAR", "FISCAL_QUARTER", "WEEK_IN_YEAR", "DAY_IN_MONTH", "SELECT", "AS", "GROUPING",
 }
 _CHILD_RELATIONSHIPS = {"Orders": "Order", "OrderItems": "OrderItem", "Cases": "Case", "Contacts": "Contact"}
+# Positive filters that actually constrain an object's records to the customer.
+# Merely mentioning an owned Id (e.g. in Description or Id != ...) is not scope.
+_OWNERSHIP_FIELDS = {
+    "Contact": {"Id": "003", "AccountId": "001", "Account.Id": "001"},
+    "Account": {"Id": "001"},
+    "Order": {"Id": "801", "AccountId": "001", "Account.Id": "001"},
+    "OrderItem": {"Id": "802", "OrderId": "801", "Order.Id": "801",
+                  "Order.AccountId": "001", "Order.Account.Id": "001"},
+    "Case": {"Id": "500", "ContactId": "003", "Contact.Id": "003",
+             "AccountId": "001", "Account.Id": "001"},
+}
 
 
 def ids_in(text: str) -> set[str]:
@@ -108,6 +119,8 @@ class SensitiveMap:
 
     def check_soql(self, query: str, self_ids: set[str]) -> Verdict:
         bare = _STRING_LITERAL.sub("''", query)
+        if re.search(r"\bFIELDS\s*\(", bare, re.I):
+            return Verdict(False, "Customer queries must name their fields explicitly.", "internal_operation_data")
         refs: list[tuple[str, str]] = []
         objects = {self.relationships.get(o, o) for o in _FROM.findall(bare)}
         for select_list, base in _SELECT.findall(bare):
@@ -118,7 +131,40 @@ class SensitiveMap:
                 obj, field = self._resolve(base, token)
                 objects.add(obj)
                 refs.append((obj, field))
-        return self._check_refs(refs, objects, query, self_ids)
+        verdict = self._check_refs(refs, objects, query, self_ids)
+        if not verdict.allowed or not objects & self.scoped_objects:
+            return verdict
+        # Fail closed for nested queries: an inner owned Id does not prove the
+        # outer query is scoped. The solver can make explicit scoped calls instead.
+        if len(re.findall(r"\bSELECT\b", bare, re.I)) != 1:
+            return Verdict(False, "Use separate customer-scoped queries instead of nested queries.",
+                           "private_customer_information")
+        base = next(iter(_FROM.findall(bare)), "")
+        if not self._has_ownership_filter(query, base, self_ids):
+            return Verdict(False, "Use a positive Id, ContactId, or AccountId filter on the customer's own records.",
+                           "private_customer_information")
+        return verdict
+
+    def _has_ownership_filter(self, query: str, base: str, self_ids: set[str]) -> bool:
+        # Blank quoted values without changing offsets; locate the actual WHERE,
+        # never a word supplied inside a string literal.
+        bare = _STRING_LITERAL.sub(lambda match: " " * len(match.group()), query)
+        where = re.search(r"\bWHERE\b", bare, re.I)
+        if not where or re.search(r"\b(?:OR|NOT)\b", bare[where.end():], re.I):
+            return False
+        suffix = re.search(r"\b(?:GROUP\s+BY|ORDER\s+BY|LIMIT|OFFSET|WITH)\b", bare[where.end():], re.I)
+        end = where.end() + suffix.start() if suffix else len(query)
+        clause = query[where.end():end]
+        fields = {field.lower(): prefix for field, prefix in _OWNERSHIP_FIELDS.get(base, {}).items()}
+        for match in re.finditer(r"(?<![\w.])([A-Za-z_]\w*(?:\.\w+)*)\s*(?:=\s*('[^']*')|\bIN\s*\(([^()]*)\))", clause, re.I):
+            prefix = fields.get(match.group(1).lower())
+            values = match.group(2) or match.group(3) or ""
+            if not prefix or not re.fullmatch(r"\s*'[A-Za-z0-9]{15,18}'(?:\s*,\s*'[A-Za-z0-9]{15,18}')*\s*", values):
+                continue
+            ids = ids_in(values)
+            if ids and all(value.startswith(prefix) and in_ids(value, self_ids) for value in ids):
+                return True
+        return False
 
     def check_sosl(self, query: str) -> Verdict:
         m = _RETURNING.search(_STRING_LITERAL.sub("''", query))
@@ -134,8 +180,12 @@ class SensitiveMap:
         return Verdict(True)
 
     def check_get_record(self, object_name: str, record_id: str, fields: list[str] | None, self_ids: set[str]) -> Verdict:
-        refs = [(object_name, f) for f in (fields or [])]
-        return self._check_refs(refs, {object_name}, record_id, self_ids)
+        if not fields and any(key.startswith(f"{object_name}.") and cls in ("internal_ops", "confidential")
+                              for key, cls in self.field_class.items()):
+            return Verdict(False, f"Name explicit safe fields when reading {object_name}; all fields include internal data.",
+                           "internal_operation_data")
+        refs = [self._resolve(object_name, f) for f in (fields or [])]
+        return self._check_refs(refs, {object_name, *(obj for obj, _ in refs)}, record_id, self_ids)
 
 
 @lru_cache(maxsize=1)
