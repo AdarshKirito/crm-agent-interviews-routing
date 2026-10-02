@@ -43,6 +43,10 @@ Success per task type before the changes below:
 | wrong_stage_rectification | single | - | 5/10 |
 | all types | multi | - | 9/20 |
 
+Effect, measured by the final dev run (`results/dev_summary.md`) on the same business single-turn
+tasks: 3.1 Flash-Lite 57.9% -> 64.2% (190 tasks), 3.8 Flash 52.0% -> 61.0% (the 100 tasks this pass
+reached).
+
 ## What changed, and the dev evidence for it
 
 Where a policy's wording and the org data disagreed, the rule was checked with read-only
