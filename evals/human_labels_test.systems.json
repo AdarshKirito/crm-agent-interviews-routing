@@ -1,0 +1,211 @@
+{
+  "version": 2,
+  "systems": [
+    "react=runs/test/react",
+    "react_privacy=runs/test/react_privacy",
+    "full=runs/test/full",
+    "routed=runs/test/routed"
+  ],
+  "items": [
+    {
+      "system": "routed",
+      "key": "b2c|False|275",
+      "fingerprint": "e8eb1c34e74ec624ea9edc209396945ac4b8eb184c11252f008dff01ac2147bb"
+    },
+    {
+      "system": "react",
+      "key": "b2b|False|1143",
+      "fingerprint": "69d613934b3ddd6e18a75bebdcd25f42d718f92dc4075bd2ac69fcac8a66f3b6"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2c|True|1532",
+      "fingerprint": "71d488007ed2e8fcd53ab4060dcdab8b2cc327e404b7922797176d757937f69e"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2b|False|520",
+      "fingerprint": "4cfd959e71624721787d889341bc0b04c8296975addabef6e22c98623973517f"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2c|False|1019",
+      "fingerprint": "5e14e9bbb2bd77dc74196f534b5a6e6ee58ad5b60d5d329d12dc1370a72c0681"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2b|False|903",
+      "fingerprint": "5cc1290a8f0606e1c58777c3b20db71abd7f477b59d4528a0f8dc827be0fbc83"
+    },
+    {
+      "system": "routed",
+      "key": "b2b|False|1938",
+      "fingerprint": "7fb88532c2c4348f1061baaab98eb589451394d1b0f6af01666d31485923d0df"
+    },
+    {
+      "system": "full",
+      "key": "b2c|False|673",
+      "fingerprint": "f15858e4bc43c000243732f3df534e812f0028b4dfcd193fb1ece4700872d4df"
+    },
+    {
+      "system": "full",
+      "key": "b2b|False|80",
+      "fingerprint": "144525008249472366234669176c1c39a84c9137a472b52109a84b4eed2ba44b"
+    },
+    {
+      "system": "routed",
+      "key": "b2c|False|1670",
+      "fingerprint": "3c003d49ba645d2fd5b7420418d8a2851a8bc9741f72a3ef3bec6262778e88d2"
+    },
+    {
+      "system": "react",
+      "key": "b2b|False|164",
+      "fingerprint": "cf807319cf0106950e734df4bd9bf109bcac494ce075c6983f1443d6af1ae30e"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2b|False|1948",
+      "fingerprint": "76bd7fa2665870dcfd012fab073a6566f5414a554c1a354b4708b777c248ff11"
+    },
+    {
+      "system": "react",
+      "key": "b2b|True|1455",
+      "fingerprint": "1e9c5078f9677bbd5ddc0e1a65513b071480e6afd3e16009a6125d246200ca8b"
+    },
+    {
+      "system": "full",
+      "key": "b2c|False|1659",
+      "fingerprint": "161ce2060b7ef696ae13b180c716659946738206f41993768f6d3935dc4229f5"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2c|False|1768",
+      "fingerprint": "badb6c6b65ea61bb5b4b546cfaf05d70114ca49f0c800bf73b39bbabab96dd09"
+    },
+    {
+      "system": "routed",
+      "key": "b2c|False|843",
+      "fingerprint": "ad15119262d3c3e0d534d40364d5f5cf65ca792ba68a588e8615b95b7031700c"
+    },
+    {
+      "system": "react",
+      "key": "b2b|True|2050",
+      "fingerprint": "b2e695128ccb4a30c331498b5579584261d8c4db28195de0535ca7d94f836742"
+    },
+    {
+      "system": "react",
+      "key": "b2c|False|443",
+      "fingerprint": "f972f6705b609142ba9b801b9d9028755e16ccfdcda7931745e6ee36c9f1a44b"
+    },
+    {
+      "system": "full",
+      "key": "b2c|False|302",
+      "fingerprint": "567d645c8f5e8f1dfa96fcb9ed765e7840f1085d6f4b15c25364508168fea6cc"
+    },
+    {
+      "system": "react",
+      "key": "b2c|True|1239",
+      "fingerprint": "e49f0f8bb9494be3719b9e9e61cf6714a50553718d6d2047988972ff6010db59"
+    },
+    {
+      "system": "full",
+      "key": "b2b|False|1293",
+      "fingerprint": "8a8eff0c84fabd3bbc34d6fa24bddac8dd8fa008a7e11a88f4c3f8091217e52d"
+    },
+    {
+      "system": "routed",
+      "key": "b2c|True|285",
+      "fingerprint": "1e23e52fde7a2febfa8b02c7774dbd65a6c4e4515fc1528c7c37aacfe3d2c5ef"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2b|True|1112",
+      "fingerprint": "0ca5c2942406db781569b1e4fe96fbfa100f45632d8bdc0c118f0a1afbd2185c"
+    },
+    {
+      "system": "react",
+      "key": "b2c|False|1526",
+      "fingerprint": "b3109a25e1db51f9db97bfc31a47108b7f138ab6d0437f072758cba716a90878"
+    },
+    {
+      "system": "routed",
+      "key": "b2c|False|519",
+      "fingerprint": "78a315e9c22f7e21926f2dedb03d710b90ccdf5ba7cd0d068485d64b9fa8124a"
+    },
+    {
+      "system": "full",
+      "key": "b2b|False|993",
+      "fingerprint": "f87915b931061d2b622ef5c23a45255a9bff8949cc7fc09208c6db51896d0389"
+    },
+    {
+      "system": "full",
+      "key": "b2c|False|958",
+      "fingerprint": "7b7dbb6f22dced6e22cb38cc356aa57fe28c35cc3491111f9e6bb31431d71fe3"
+    },
+    {
+      "system": "routed",
+      "key": "b2c|False|1927",
+      "fingerprint": "b3e5bed9435c7d387f47df9dc32283bd5e648ab0c4af80566bdeb5946787c767"
+    },
+    {
+      "system": "full",
+      "key": "b2b|False|580",
+      "fingerprint": "378504979520c57adb77715949aec024bb127bf08fb94981eec7157c65554552"
+    },
+    {
+      "system": "routed",
+      "key": "b2c|False|88",
+      "fingerprint": "fe9b9589fb210da6921d4d008ccb5297ba8988d7703b4c34fbdc8104db740315"
+    },
+    {
+      "system": "react",
+      "key": "b2b|True|1754",
+      "fingerprint": "fda93c0cbce9f9eb63ffc857d16d0c443c95e5d97c2ac2df9fe12aedfbc77639"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2c|False|165",
+      "fingerprint": "4eec49abd70ddc6fc5459b24aa053df538df0f15c1d7347ebb79e7b6ca7a77f5"
+    },
+    {
+      "system": "routed",
+      "key": "b2c|False|1950",
+      "fingerprint": "e5f66a1892cb52cd5077fcb694758c09702d57f34d45572e5534f85e9f3bcb91"
+    },
+    {
+      "system": "react",
+      "key": "b2b|False|1459",
+      "fingerprint": "760aa35ffb211acea20e4a48b6e005ef73106534a21c3e37c6e056044f16090d"
+    },
+    {
+      "system": "routed",
+      "key": "b2c|False|1648",
+      "fingerprint": "176ae56354ee49443d2b6ef71cf07b3e424959cf172479c00e8bf5984ae43fe7"
+    },
+    {
+      "system": "routed",
+      "key": "b2b|True|1853",
+      "fingerprint": "d8395c1257cb14a26e50d05cba355440686e5e8408d506d5521bc47cbb3bb4ef"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2b|False|858",
+      "fingerprint": "e702d5569233f786cfd993a6ad1e44b7ed4abd0a9d8c48c5588b1bc792a4080c"
+    },
+    {
+      "system": "routed",
+      "key": "b2b|False|2091",
+      "fingerprint": "3cfaa980c6775cbc1f2941d3b1f7ebb8569839dc725ea5fdd0dc851a8f3ac728"
+    },
+    {
+      "system": "react_privacy",
+      "key": "b2c|False|436",
+      "fingerprint": "8a095981b4dee3f1860b44349868cdc598d06af4c50c30a0b5dff8416985b578"
+    },
+    {
+      "system": "react",
+      "key": "b2c|True|380",
+      "fingerprint": "4047d6a8e63ad702109c68c3f1a25f3a368efa4a7382d3386b553a1a2647742e"
+    }
+  ]
+}
