@@ -23,7 +23,8 @@ jobs:
           cache-dependency-path: mcp-salesforce/package-lock.json
       - run: npm ci
       - run: npm run typecheck
-      - run: npx tsx --test test/guards.test.ts
+      - name: Offline tests (guards, cache, pagination, startup, tool budgets)
+        run: npm test
 
   agent:
     runs-on: ubuntu-latest
@@ -60,4 +61,27 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m py_compile scripts/*.py
-      - run: bash -n scripts/run_systems.sh deploy/start.sh
+      - run: bash -n scripts/run_systems.sh scripts/dev_up.sh deploy/start.sh
+
+  benchmark:
+    runs-on: ubuntu-latest
+    env:
+      HF_HUB_OFFLINE: "1"
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          python-version: "3.11"
+      - name: Reproduce patched benchmark from its pinned upstream commit
+        run: |
+          GIT_LFS_SKIP_SMUDGE=1 git clone -q https://github.com/SalesforceAIResearch/CRMArena vendor/CRMArena
+          cd vendor/CRMArena
+          git checkout -q "$(cat ../../patches/crmarena-base-commit.txt)"
+          git apply --check ../../patches/crmarena-crmroute.patch
+          git apply ../../patches/crmarena-crmroute.patch
+          uv venv -q --python 3.11 .venv
+          uv pip install -q --python .venv -r ../../patches/crmarena-requirements.txt
+          uv pip install -q --python .venv -e . --no-deps
+      - name: Offline runner, adapter, manifest and evaluation regression tests
+        run: vendor/CRMArena/.venv/bin/python -m pytest tests -q

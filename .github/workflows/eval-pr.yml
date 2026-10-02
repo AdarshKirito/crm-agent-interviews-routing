@@ -86,6 +86,7 @@ jobs:
              CRMROUTE_POLICY_MODEL=gemini-3.1-flash-lite CRMROUTE_FALLBACK=0 CRMROUTE_MODE=no_route \
              nohup .venv/bin/uvicorn app.fast_api_app:app --host 127.0.0.1 --port 8000 > ../runs/ci/logs/agent.log 2>&1 &)
           for i in $(seq 1 90); do curl -sf http://127.0.0.1:8000/list-apps && break; sleep 2; done
+          curl --fail --silent --show-error http://127.0.0.1:8000/list-apps
 
       - name: Run the 15 cases
         run: vendor/CRMArena/.venv/bin/python scripts/ci_eval.py run --out runs/ci
