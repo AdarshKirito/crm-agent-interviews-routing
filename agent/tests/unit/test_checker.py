@@ -51,4 +51,15 @@ def test_refusal_only_for_customers():
 
 def test_long_free_text_fails():
     assert not run("answer", "word " * 90, "knowledge_qa").ok
+    # a full explanatory sentence is too long for a short-phrase reference
+    assert not run("answer", "word " * 31, "knowledge_qa").ok
     assert run("answer", "Because breaches could be catastrophic.", "knowledge_qa").ok
+    assert run("answer", "Flexible financing options, customized payment plans, leasing options, and extended warranties.",
+               "knowledge_qa").ok
+
+
+def test_stage_answer_may_be_none_when_current_stage_is_right():
+    assert run("answer", "None", "wrong_stage_rectification").answer == "None"
+    r = run("answer", "It should be negotiation.", "wrong_stage_rectification")
+    assert r.ok and r.answer == "Negotiation"
+    assert not run("answer", "Quote or Negotiation", "wrong_stage_rectification").ok

@@ -107,10 +107,12 @@ def check_answer(kind: str, answer: str, spec: TaskSpec, evidence: str, *, custo
             return CheckResult(True, months[0])
         return CheckResult(False, answer, ["Answer with one month name, or None."])
     if form == "stage":
+        if _is_none(answer):
+            return CheckResult(True, "None")
         stages = [s for s in STAGES if re.search(rf"\b{s}\b", answer, re.I)]
         if len(stages) == 1:
             return CheckResult(True, stages[0])
-        return CheckResult(False, answer, [f"Answer with exactly one stage from: {', '.join(STAGES)}."])
+        return CheckResult(False, answer, [f"Answer with exactly one stage from: {', '.join(STAGES)}, or None."])
     if form == "bant":
         if _is_none(answer):
             return CheckResult(True, "None")
@@ -120,9 +122,10 @@ def check_answer(kind: str, answer: str, spec: TaskSpec, evidence: str, *, custo
         return CheckResult(False, answer, [f"Answer with the failing factors from {', '.join(BANT)}, or None."])
     if form == "refusal":
         return CheckResult(True, answer)
-    # free text
-    if len(answer.split()) > 80:
-        return CheckResult(False, answer, ["Be concise: answer in one sentence or a short list."])
+    # free text: graded by token overlap with a short reference phrase
+    if len(answer.split()) > 30:
+        return CheckResult(False, answer, ["Too long: answer with a short phrase or list (at most about 15 words) "
+                                           "in the source's own wording, without explanation."])
     return CheckResult(True, answer)
 
 

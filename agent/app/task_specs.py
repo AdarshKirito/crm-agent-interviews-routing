@@ -26,6 +26,13 @@ class TaskSpec:
 
 
 _AGENT_METRIC_DETAILS = ("time period", "whether the best (lowest/highest) value is wanted", "any minimum-case filter")
+# The benchmark's activity-priority guide, shortened; multi-turn tasks give the agent no task context.
+_STAGE_TASKS = ("Stage task lists: Qualification - prospect research, introductory emails or calls, scheduling discovery "
+                "meetings; Discovery - industry/competitor research, pain points, needs conversations, solution alignment; "
+                "Quote - detailed follow-ups, tailored proposals, needs analysis, demos or trials, case studies; "
+                "Negotiation - negotiation meetings on terms and pricing, objections, contract preparation and review; "
+                "Closed - kick-off or onboarding, win/loss analysis, recording final contract details, internal reviews "
+                "of the deal, upsell or nurturing.")
 
 SPECS: dict[str, TaskSpec] = {
     "handle_time": TaskSpec(
@@ -60,24 +67,29 @@ SPECS: dict[str, TaskSpec] = {
         ("Read the case's chat transcript / emails, then search knowledge articles for the policy that applies.",),
     ),
     "top_issue_identification": TaskSpec(
-        "id", "the Issue__c Id reported most often for a product in a period",
+        "id", "the Issue__c Id reported most often for a product in a period, or None if the product has no cases then",
         ("the product", "time period"),
-        ("Count cases per IssueId__c for cases whose order item is for that product, within the period.",),
+        ("Count cases per IssueId__c for cases whose order item is for that product, within the period.",
+         "If no case of that product falls in the period, the answer is None."),
     ),
     "monthly_trend_analysis": TaskSpec(
-        "month", "the month whose case count for a product is clearly higher than every other month, or None",
+        "month", "the month with more cases of a product than every other month in the period, or None",
         ("the product", "time period"),
-        ("Group the product's cases by calendar month; answer None if no month stands out.",),
+        ("Count the product's cases per calendar month inside the period only (it ends on today's date).",
+         "A month counts if its total is larger than each other month's, even by one case (1 vs 0); "
+         "answer None only if the top count is tied or there are no cases."),
     ),
     "knowledge_qa": TaskSpec(
         "text", "a short answer to a question, grounded in the knowledge articles",
         ("the question",),
-        ("Search knowledge articles and answer in one concise sentence using their wording.",),
+        ("Search knowledge articles and answer with the phrase from the article that answers the question, "
+         "kept to its key words (about 5-15 words).",),
     ),
     "sales_amount_understanding": TaskSpec(
         "id", "the User Id of the agent with the highest/lowest sales amount in a period",
         _AGENT_METRIC_DETAILS,
-        ("Follow the sales-amount policy in the task context (Quantity * UnitPrice, contract signed dates).",),
+        ("Sales amount = sum of OrderItem Quantity * UnitPrice over Orders whose EffectiveDate (the contract's "
+         "company-signed date) falls in the period, credited to the Order's OwnerId (not the opportunity owner).",),
     ),
     "lead_routing": TaskSpec(
         "id", "the User Id of the agent a new lead should be assigned to under the lead routing policy",
@@ -87,7 +99,9 @@ SPECS: dict[str, TaskSpec] = {
     "sales_cycle_understanding": TaskSpec(
         "id", "the User Id of the agent with the quickest/slowest average sales cycle in a period",
         _AGENT_METRIC_DETAILS,
-        ("Sales cycle = days from Opportunity CreatedDate to the contract's CompanySignedDate.",),
+        ("Sales cycle = days from Opportunity CreatedDate to its contract's (ContractId__c) CompanySignedDate, "
+         "or CustomerSignedDate where CompanySignedDate is empty; average per Opportunity OwnerId over "
+         "opportunities whose contract was signed in the period.",),
     ),
     "conversion_rate_comprehension": TaskSpec(
         "id", "the User Id of the agent with the highest/lowest lead conversion rate in a period",
@@ -95,19 +109,25 @@ SPECS: dict[str, TaskSpec] = {
         ("Conversion rate = converted leads / leads created in the window, per owner.",),
     ),
     "wrong_stage_rectification": TaskSpec(
-        "stage", "the stage an opportunity should be in, given its tasks",
+        "stage", "the stage an opportunity should be in, given its tasks, or None if its current stage is right",
         ("the opportunity",),
-        ("Compare the opportunity's Task records with the stage definitions (search knowledge if needed).",),
+        ("The right stage is the stage of the opportunity's most recent Task (latest ActivityDate); answer None "
+         "if that is already its current StageName.",
+         _STAGE_TASKS),
     ),
     "sales_insight_mining": TaskSpec(
         "text", "the sales-discussion subtopics that match the question for an opportunity",
         ("the opportunity",),
-        ("Read the opportunity's VoiceCallTranscript__c records and name the subtopics in a comma-separated list.",),
+        ("Read the opportunity's VoiceCallTranscript__c records and name the subtopics or competitors in a "
+         "comma-separated list, written as they appear in the transcripts.",),
     ),
     "quote_approval": TaskSpec(
         "id", "the Id of the knowledge article a quote violates, or None",
         ("the quote",),
-        ("Read the quote's line items (quantity, discount, price) and search the policy articles they may break.",),
+        ("Quote approval is decided by the pricing rules: read the quote's line items (quantity, discount, price) and "
+         "check every line item's discount against 'Volume-Based Discounts' (and 'Competing Offers' if the quote "
+         "cites a competing offer). Product-configuration rules are a different check. Answer None if every "
+         "discount is allowed.",),
     ),
     "lead_qualification": TaskSpec(
         "bant", "the BANT factors the lead fails, or None",
@@ -115,14 +135,18 @@ SPECS: dict[str, TaskSpec] = {
         ("Read the lead's VoiceCallTranscript__c records and the qualification articles; list only unmet factors.",),
     ),
     "activity_priority": TaskSpec(
-        "ids", "the Ids of 'Not Started' tasks that do not match the opportunity's stage",
+        "ids", "the Ids of 'Not Started' tasks that belong to a later stage than the opportunity's current stage",
         ("the opportunity",),
-        ("List the opportunity's Not Started Task records and compare each with the stage's task list in the context.",),
+        ("List the opportunity's Not Started Task records and match each to a stage.",
+         "Only tasks of a later stage are mismatched (e.g. contract or kick-off tasks while still in Discovery); "
+         "leftover tasks of the current or earlier stages still match.",
+         _STAGE_TASKS),
     ),
     "invalid_config": TaskSpec(
         "id", "the Id of the knowledge article a quote's product setup violates, or None",
         ("the quote",),
-        ("Read the quote's line items and search the configuration rules in knowledge articles.",),
+        ("Read the quote's line items (product, quantity), then the configuration rule articles 'Product Quantity "
+         "Limits', 'Product Exclusion Constraints' and 'Mandatory Bundles for Quotes', and check each item against all three.",),
     ),
 }
 for _t in CONFIDENTIALITY_TYPES:

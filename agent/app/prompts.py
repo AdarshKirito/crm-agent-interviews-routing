@@ -14,10 +14,11 @@ ANSWER_FORMS = {
     "id": "only the Salesforce Id (e.g. 005Wt000003NDqDIAW), or None if no record qualifies",
     "ids": "only the Salesforce Ids, comma-separated, or None if no record qualifies",
     "state": "only the two-letter US state code (e.g. CA)",
-    "month": "only the month name (e.g. November), or None if no month stands out",
-    "stage": f"only one stage name from: {', '.join(STAGES)}",
+    "month": "only the month name (e.g. November), or None if the top month is tied or there are no records",
+    "stage": f"only one stage name from: {', '.join(STAGES)}, or None if the current stage is already right",
     "bant": f"only the failing factors from: {', '.join(BANT)} (comma-separated), or None if the lead qualifies",
-    "text": "a concise answer (one sentence or a short comma-separated list) using the source's wording",
+    "text": "a short phrase or comma-separated list (at most about 15 words) in the source's own wording, "
+            "no full sentences, preamble or explanation",
     "refusal": "a refusal that says the information is confidential",
 }
 
@@ -57,12 +58,18 @@ def solver_instruction(ctx: ReadonlyContext) -> str:
         parts.append("You are a Salesforce CRM analyst helping an employee of the company. Internal data is available to them.\n")
 
     parts.append(
-        "Work only from data you retrieve with your tools; never guess Ids or values.\n"
+        "Work only from data you retrieve with your tools; never guess Ids or values. An empty result from a "
+        "correctly filtered query is an answer: if no records match the period or condition asked about, answer "
+        "None instead of widening the search or picking a value.\n"
         "Tools: soql_query (read-only SOQL), sosl_search (text search), describe_object (fields of an object), "
         "get_record (one record by Id), search_knowledge (the company's knowledge articles).\n"
         "SOQL tips: use relationship fields (e.g. Owner.Name, Account.ShippingState), aggregate with COUNT()/AVG() "
         "and GROUP BY, compare dates with literals like 2024-01-31T00:00:00Z, and compute durations yourself from "
         "the returned timestamps. Filter narrowly and fetch only the fields you need.\n"
+        "Time periods: a relative period ('last 4 months', 'past two quarters') ends on today's date from the task "
+        "context, so bound BOTH ends of every date filter. The org also holds records dated after today's date; "
+        "they are outside the period. If a relative period is asked about and no today's date is given, ask the "
+        "user for today's date or the exact dates.\n"
     )
 
     task_context = (state.get(K.TASK_CONTEXT) or "").strip()
@@ -94,8 +101,10 @@ def solver_instruction(ctx: ReadonlyContext) -> str:
         parts.append(
             "## Talking with the user\n"
             f"The user may not say everything at once. This kind of task needs: {need}. If a needed detail is "
-            "missing and cannot be found with your tools, set kind=clarify and ask ONE short question that names "
-            f"exactly what is missing (you have asked {asked} so far). Do not ask about things you can look up.\n"
+            "missing, set kind=clarify and ask ONE short question that names exactly what is missing (you have "
+            f"asked {asked} so far). Which record the user means (a lead, case, opportunity, quote or product Id) "
+            "and which time period they mean can only come from the user: ask right away instead of searching for "
+            "candidates. Do not ask about facts you can look up once you know the record.\n"
         )
     else:
         parts.append("## Answer now\nDo not ask questions. If something is ambiguous, choose the most reasonable reading and answer.\n")
