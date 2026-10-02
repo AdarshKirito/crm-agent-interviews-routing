@@ -24,8 +24,12 @@ from google.adk.runners import Runner
 
 from app.app_utils import services
 from app.app_utils.a2a import attach_a2a_routes
+from app.tracing import setup_tracing
 
 load_dotenv()
+# Before get_fast_api_app: ADK installs its own global TracerProvider there, after which
+# Phoenix could not become the provider that ADK's spans go to.
+setup_tracing()
 allow_origins = (
     os.getenv("ALLOW_ORIGINS", "").split(",") if os.getenv("ALLOW_ORIGINS") else None
 )
