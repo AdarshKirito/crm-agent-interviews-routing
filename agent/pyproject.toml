@@ -15,7 +15,7 @@ dependencies = [
     "fastembed>=0.8.1,<0.9",
     "httpx>=0.28",
     "pyyaml>=6.0.1",
-    "openinference-instrumentation-google-adk>=0.1.28",
+    "openinference-instrumentation-google-adk>=1.0.2",
     "arize-phoenix-otel>=0.17",
     "litellm>=1.84,!=1.82.7,!=1.82.8",
     "python-dotenv>=1.0",
