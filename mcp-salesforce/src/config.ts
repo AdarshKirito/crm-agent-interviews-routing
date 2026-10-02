@@ -37,15 +37,17 @@ export function parseOrg(value: string | null | undefined): OrgName | undefined 
 
 function intEnv(name: string, fallback: number): number {
     const raw = process.env[name];
-    const n = raw ? Number.parseInt(raw, 10) : Number.NaN;
-    return Number.isFinite(n) && n > 0 ? n : fallback;
+    const n = raw ? Number(raw) : Number.NaN;
+    return Number.isSafeInteger(n) && n > 0 ? n : fallback;
 }
+
+const hardMaxRows = intEnv('SF_HARD_MAX_ROWS', 2000);
 
 export const settings = {
     defaultOrg: parseOrg(process.env.CRM_DEFAULT_ORG) ?? 'b2b',
     apiVersion: process.env.SALESFORCE_API_VERSION ?? '62.0',
-    maxRows: intEnv('SF_MAX_ROWS', 200),
-    hardMaxRows: intEnv('SF_HARD_MAX_ROWS', 2000),
+    maxRows: Math.min(intEnv('SF_MAX_ROWS', 200), hardMaxRows),
+    hardMaxRows,
     maxTextChars: intEnv('SF_MAX_TEXT_CHARS', 4000),
     // total size of one tool result; keeps the model's context (and free-tier token use) bounded
     maxResponseChars: intEnv('SF_MAX_RESPONSE_CHARS', 16000),

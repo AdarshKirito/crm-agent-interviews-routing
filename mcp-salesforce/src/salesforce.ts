@@ -97,36 +97,63 @@ export interface QueryOutput {
 
 /** Keep whole records until the response budget is used; say so when rows were cut. */
 export function fitToBudget(out: QueryOutput, budget = settings.maxResponseChars): QueryOutput {
-    let used = 0;
-    const kept: Row[] = [];
-    for (const r of out.records) {
-        const size = JSON.stringify(r).length + 1;
-        if (kept.length > 0 && used + size > budget) break;
-        kept.push(r);
-        used += size;
-    }
-    if (kept.length === out.records.length) return out;
-    return {
-        ...out,
-        returned: kept.length,
+    if (JSON.stringify(out).length <= budget) return out;
+    const shortened = (count: number): QueryOutput => ({
+        totalSize: out.totalSize,
+        returned: count,
         truncated: true,
-        records: kept,
-        note: `Only ${kept.length} of ${out.records.length} rows fit in one response. Filter further, select fewer or shorter fields, or aggregate.`
-    };
+        records: out.records.slice(0, count),
+        note: `${out.note ? `${out.note} ` : ''}Only ${count} of ${out.records.length} rows fit in one response. Filter further, select fewer or shorter fields, or aggregate.`
+    });
+    if (JSON.stringify(shortened(0)).length > budget) {
+        throw new SalesforceError('Response budget is too small for query metadata; increase SF_MAX_RESPONSE_CHARS.');
+    }
+    // Binary search avoids repeatedly serializing every prefix for large results.
+    let low = 0;
+    let high = out.records.length;
+    while (low < high) {
+        const count = Math.ceil((low + high) / 2);
+        if (JSON.stringify(shortened(count)).length <= budget) low = count;
+        else high = count - 1;
+    }
+    return shortened(low);
 }
 
 export function soqlQuery(org: OrgName, soql: string, maxRows: number): Promise<QueryOutput> {
     return withConnection(org, async conn => {
-        const result = await conn.query(soql, { autoFetch: true, maxFetch: maxRows });
-        const records = dropEmptyColumns((result.records as unknown[]).slice(0, maxRows).map(r => cleanRecord(r) as Row));
+        // jsforce's autoFetch also exhausts every child subquery (without the
+        // parent's maxFetch cap). Page only the outer query and mark incomplete
+        // children instead of silently presenting them as complete evidence.
+        let page = await conn.query(soql, { autoFetch: false, maxFetch: maxRows });
+        const totalSize = page.totalSize;
+        const rawRecords: unknown[] = [...page.records];
+        const visited = new Set<string>();
+        while (!page.done && page.nextRecordsUrl && rawRecords.length < maxRows) {
+            if (visited.has(page.nextRecordsUrl)) break;
+            visited.add(page.nextRecordsUrl);
+            page = await conn.queryMore(page.nextRecordsUrl).execute({ autoFetch: false, maxFetch: maxRows - rawRecords.length });
+            rawRecords.push(...page.records);
+        }
+        const selected = rawRecords.slice(0, maxRows);
+        const childTruncated = selected.some(hasIncompleteChildren);
+        const records = dropEmptyColumns(selected.map(r => cleanRecord(r) as Row));
         return fitToBudget({
-            totalSize: result.totalSize,
+            totalSize,
             returned: records.length,
-            // COUNT() returns no rows; only a result cut at the row cap is truncated
-            truncated: records.length >= maxRows && result.totalSize > records.length,
-            records
+            // COUNT() returns no rows but has done=true and is not truncated.
+            truncated: page.done === false || (records.length > 0 && totalSize > records.length) || childTruncated,
+            records,
+            ...(childTruncated ? { note: 'Some child relationship results are incomplete. Query the child object directly with filters or aggregates.' } : {})
         });
     });
+}
+
+function hasIncompleteChildren(value: unknown): boolean {
+    if (Array.isArray(value)) return value.some(hasIncompleteChildren);
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as Row;
+    if (Array.isArray(obj.records) && (obj.done === false || Number(obj.totalSize) > obj.records.length)) return true;
+    return Object.values(obj).some(hasIncompleteChildren);
 }
 
 export function soslSearch(org: OrgName, sosl: string, maxRows: number): Promise<QueryOutput> {
@@ -147,10 +174,17 @@ export interface FieldInfo {
     picklistValues?: string[];
 }
 
-export function describeObject(org: OrgName, objectName: string) {
+export function describeObject(org: OrgName, objectName: string, fieldNames?: string[]) {
     return withConnection(org, async conn => {
         const d = await conn.describe(objectName);
-        const fields: FieldInfo[] = d.fields.map(f => {
+        const requested = new Set((fieldNames ?? []).map(f => f.toLowerCase()));
+        const selected = requested.size ? d.fields.filter(f => requested.has(f.name.toLowerCase())) : d.fields;
+        if (requested.size) {
+            const found = new Set(selected.map(f => f.name.toLowerCase()));
+            const missing = [...requested].filter(f => !found.has(f));
+            if (missing.length) throw new SalesforceError(`Unknown fields on ${objectName}: ${missing.join(', ')}`);
+        }
+        const fields: FieldInfo[] = selected.map(f => {
             const info: FieldInfo = { name: f.name, label: f.label, type: f.type };
             if (f.referenceTo && f.referenceTo.length > 0) info.referenceTo = f.referenceTo as string[];
             if (f.relationshipName) info.relationshipName = f.relationshipName;

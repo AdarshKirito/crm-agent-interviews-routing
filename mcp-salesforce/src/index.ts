@@ -11,15 +11,13 @@ import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 
-import { cacheStats } from './cache.js';
-import { type OrgName, parseOrg, settings } from './config.js';
-import { registerTools } from './tools.js';
+import type { OrgName } from './config.js';
 
 const { values: flags } = parseArgs({
     options: {
         http: { type: 'boolean', default: false },
-        port: { type: 'string', default: process.env.PORT ?? '3333' },
-        host: { type: 'string', default: process.env.HOST ?? '127.0.0.1' },
+        port: { type: 'string' },
+        host: { type: 'string' },
         env: { type: 'string' }
     }
 });
@@ -29,6 +27,14 @@ if (envFile) {
     if (!existsSync(envFile)) throw new Error(`env file not found: ${envFile}`);
     process.loadEnvFile(envFile);
 }
+
+// These modules snapshot environment settings during import. Load --env first,
+// including settings used to construct the tool schemas and cache namespace.
+const { parseOrg, settings } = await import('./config.js');
+const { cacheStats } = await import('./cache.js');
+const { registerTools } = await import('./tools.js');
+const port = flags.port ?? process.env.PORT ?? '3333';
+const host = flags.host ?? process.env.HOST ?? '127.0.0.1';
 
 function buildServer(org: OrgName): McpServer {
     const server = new McpServer({ name: 'crmroute-salesforce', version: '0.1.0' });
@@ -44,7 +50,7 @@ if (!flags.http) {
         buildServer(parseOrg(requestInfo?.headers.get('x-crm-org')) ?? settings.defaultOrg)
     );
     const nodeHandler = toNodeHandler(handler);
-    const loopback = ['127.0.0.1', 'localhost', '::1'].includes(flags.host);
+    const loopback = ['127.0.0.1', 'localhost', '::1'].includes(host);
     const validateHost = localhostHostValidation();
     const validateOrigin = localhostOriginValidation();
     const bearer = process.env.MCP_BEARER_TOKEN;
@@ -69,8 +75,8 @@ if (!flags.http) {
             return send(res, 400, { error: `unknown org "${orgHeader}"; use b2b, b2c or original` });
         }
         void nodeHandler(req, res);
-    }).listen(Number(flags.port), flags.host, () => {
-        console.error(`[mcp-salesforce] http://${flags.host}:${flags.port}/mcp (default org=${settings.defaultOrg})`);
+    }).listen(Number(port), host, () => {
+        console.error(`[mcp-salesforce] http://${host}:${port}/mcp (default org=${settings.defaultOrg})`);
     });
 
     process.on('SIGINT', async () => {

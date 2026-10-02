@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 
-import { cached } from './cache.js';
+import { cachedForOrg } from './cache.js';
 import { type OrgName, settings } from './config.js';
 import { GuardError, checkApiName, checkId, checkSoql, checkSosl, soslTerms } from './guards.js';
 import { SalesforceError, describeObject, getRecord, soqlQuery, soslSearch } from './salesforce.js';
@@ -13,7 +13,11 @@ const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
 
 function ok(value: unknown): ToolResult {
-    return { content: [{ type: 'text', text: JSON.stringify(value) }] };
+    const text = JSON.stringify(value) ?? 'null';
+    if (text.length > settings.maxResponseChars) {
+        throw new SalesforceError('Response exceeds SF_MAX_RESPONSE_CHARS. Select fewer fields, request a fields subset for get_record/describe_object, or filter/aggregate the query.');
+    }
+    return { content: [{ type: 'text', text }] };
 }
 
 async function run(fn: () => Promise<unknown>): Promise<ToolResult> {
@@ -56,7 +60,7 @@ export function registerTools(server: McpServer, org: OrgName): void {
             run(() => {
                 const soql = checkSoql(query);
                 const rows = max_rows ?? settings.maxRows;
-                return cached([org, 'soql', soql, rows], () => soqlQuery(org, soql, rows));
+                return cachedForOrg(org, ['soql', soql, rows], () => soqlQuery(org, soql, rows));
             })
     );
 
@@ -77,7 +81,7 @@ export function registerTools(server: McpServer, org: OrgName): void {
             run(() => {
                 const sosl = checkSosl(query);
                 const rows = max_rows ?? settings.maxRows;
-                return cached([org, 'sosl', sosl, rows], () => soslSearch(org, sosl, rows));
+                return cachedForOrg(org, ['sosl', sosl, rows], () => soslSearch(org, sosl, rows));
             })
     );
 
@@ -87,16 +91,19 @@ export function registerTools(server: McpServer, org: OrgName): void {
             title: 'Describe an object',
             description:
                 'List the fields of one Salesforce object (name, label, type, referenced objects, active picklist values) ' +
-                'and its child relationships. Use it before writing a query against an unfamiliar object.',
+                'and its child relationships. Use it before writing a query against an unfamiliar object. ' +
+                'If the schema exceeds the response budget, request a fields subset.',
             inputSchema: z.object({
-                object_name: z.string().describe('Object API name, e.g. Case, Opportunity, VoiceCallTranscript__c')
+                object_name: z.string().describe('Object API name, e.g. Case, Opportunity, VoiceCallTranscript__c'),
+                fields: z.array(z.string()).min(1).max(100).optional().describe('Optional field API names to describe when the full schema is too large')
             }),
             annotations: READ_ONLY
         },
-        async ({ object_name }) =>
+        async ({ object_name, fields }) =>
             run(() => {
                 const name = checkApiName(object_name);
-                return cached([org, 'describe', name], () => describeObject(org, name));
+                const cols = fields?.map(f => checkApiName(f, 'field'));
+                return cachedForOrg(org, ['describe', name, cols], () => describeObject(org, name, cols));
             })
     );
 
@@ -117,7 +124,7 @@ export function registerTools(server: McpServer, org: OrgName): void {
                 const name = checkApiName(object_name);
                 const id = checkId(record_id);
                 const cols = (fields ?? []).map(f => checkApiName(f, 'field'));
-                return cached([org, 'get', name, id, cols], () => getRecord(org, name, id, cols));
+                return cachedForOrg(org, ['get', name, id, cols], () => getRecord(org, name, id, cols));
             })
     );
 
@@ -140,9 +147,14 @@ export function registerTools(server: McpServer, org: OrgName): void {
                 const sosl =
                     `FIND {${soslTerms(query)}} IN ALL FIELDS ` +
                     `RETURNING Knowledge__kav(Id, Title, UrlName, Summary, FAQ_Answer__c) LIMIT ${k}`;
-                return cached([org, 'knowledge', sosl], async () => {
+                return cachedForOrg(org, ['knowledge', sosl], async () => {
                     const out = await soslSearch(org, sosl, k);
-                    return { returned: out.returned, articles: out.records.map(({ _type, ...rest }) => rest) };
+                    return {
+                        returned: out.returned,
+                        truncated: out.truncated,
+                        ...(out.note ? { note: out.note } : {}),
+                        articles: out.records.map(({ _type, ...rest }) => rest)
+                    };
                 });
             })
     );
