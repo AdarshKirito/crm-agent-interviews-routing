@@ -11,11 +11,23 @@ from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(REPO_ROOT / ".env", override=False)
-# ADK / google-genai: AI Studio key, not Vertex.
-if os.getenv("GEMINI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
+def _flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes")
+
+
+# Either flag turns Vertex on. google-genai uses GOOGLE_GENAI_USE_ENTERPRISE when the two
+# disagree, so both are set to the same value.
+USE_VERTEX = _flag("GOOGLE_GENAI_USE_VERTEXAI") or _flag("GOOGLE_GENAI_USE_ENTERPRISE")
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = os.environ["GOOGLE_GENAI_USE_ENTERPRISE"] = "true" if USE_VERTEX else "false"
+if USE_VERTEX:
+    # Vertex AI (application default credentials, GOOGLE_CLOUD_PROJECT / _LOCATION).
+    # google-genai silently prefers an API key over Vertex when one is set, so the AI
+    # Studio keys are removed from this process.
+    os.environ.pop("GOOGLE_API_KEY", None)
+    os.environ.pop("GEMINI_API_KEY", None)
+elif os.getenv("GEMINI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
+    # AI Studio free tier: ADK / google-genai read GOOGLE_API_KEY.
     os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
-os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "FALSE")
-os.environ.setdefault("GOOGLE_GENAI_USE_ENTERPRISE", "FALSE")
 
 DATA_DIR = Path(__file__).parent / "data"
 

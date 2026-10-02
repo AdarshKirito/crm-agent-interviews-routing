@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 
+import httpx
 import pytest
 from google.adk.models.base_llm import BaseLlm
 from google.adk.models.llm_request import LlmRequest
@@ -41,6 +42,17 @@ def test_classify_provider_errors():
     assert classify(RuntimeError("RateLimitError: Request too large for model `openai/gpt-oss-120b` on tokens per minute (TPM): "
                                  "Limit 8000, Requested 11722, please reduce your message size")) == "too_large"
     assert classify(ValueError("bad schema")) == "other"
+
+
+def test_classify_vertex_and_network_errors():
+    # Vertex's shared-quota 429 is a short wait, not a used-up daily quota
+    assert classify(RuntimeError("429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'Resource exhausted. "
+                                 "Please try again later.', 'status': 'RESOURCE_EXHAUSTED'}}")) == "rate"
+    for err in (httpx.ConnectError("[Errno 11001] getaddrinfo failed"),
+                httpx.ConnectError("[Errno -3] Temporary failure in name resolution"),
+                httpx.RemoteProtocolError("Server disconnected without sending a response."),
+                httpx.ReadError("[Errno 104] Connection reset by peer")):
+        assert classify(err) == "unavailable", err
 
 
 def test_retry_after_parsing():

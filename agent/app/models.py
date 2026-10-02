@@ -99,7 +99,10 @@ def classify(err: Exception) -> str:
         return "rate"
     if status in (500, 502, 503, 504) or any(s in low for s in (
             "503", "unavailable", "overloaded", "high demand", "serviceunavailable", "apiconnectionerror",
-            "timeout", "internalservererror", "connection refused")):
+            "timeout", "internalservererror", "connection refused",
+            # transient network failures (DNS, dropped connections) on the way to the same model
+            "connecterror", "name resolution", "getaddrinfo", "connection reset", "remoteprotocolerror",
+            "server disconnected", "cannot connect to host")):
         return "unavailable"
     return "other"
 
