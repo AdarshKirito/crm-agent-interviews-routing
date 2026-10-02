@@ -1,0 +1,159 @@
+{
+ "n": 15,
+ "task_keys": [
+  [
+   "b2b",
+   false,
+   "1165"
+  ],
+  [
+   "b2b",
+   false,
+   "1313"
+  ],
+  [
+   "b2b",
+   false,
+   "1593"
+  ],
+  [
+   "b2b",
+   false,
+   "194"
+  ],
+  [
+   "b2b",
+   false,
+   "282"
+  ],
+  [
+   "b2b",
+   false,
+   "50"
+  ],
+  [
+   "b2b",
+   false,
+   "892"
+  ],
+  [
+   "b2c",
+   false,
+   "1590"
+  ],
+  [
+   "b2c",
+   false,
+   "1747"
+  ],
+  [
+   "b2c",
+   false,
+   "1798"
+  ],
+  [
+   "b2c",
+   false,
+   "548"
+  ],
+  [
+   "b2c",
+   false,
+   "803"
+  ],
+  [
+   "b2c",
+   true,
+   "128"
+  ],
+  [
+   "b2c",
+   true,
+   "1731"
+  ],
+  [
+   "b2c",
+   true,
+   "1791"
+  ]
+ ],
+ "configurations": {
+  "b2b|False": {
+   "model": "crmroute-ci",
+   "agent_strategy": "remote",
+   "org_type": "b2b",
+   "interactive": false,
+   "agent_eval_mode": "aided",
+   "llm_provider": "bedrock",
+   "privacy_aware_prompt": false,
+   "judge_model": "openai/gpt-oss-120b",
+   "judge_provider": "groq",
+   "user_model": "gemini/gemini-3.1-flash-lite",
+   "user_provider": "gemini",
+   "max_turns": 20,
+   "max_user_turns": 10,
+   "remote_app": "app",
+   "tasks_sha256": "f4339e260567326bb4f2ceacc49e5210dc720e4d0abe76424518ae21c93ee198",
+   "generation": {
+    "CRMARENA_THINKING_LEVEL": "low",
+    "CRMARENA_MAX_TOKENS": "8192",
+    "CRMARENA_OLLAMA_NUM_CTX": "16384",
+    "CRMARENA_MAX_REQUEST_TOKENS": "250000",
+    "GOOGLE_CLOUD_PROJECT": "",
+    "GOOGLE_CLOUD_LOCATION": ""
+   }
+  },
+  "b2c|False": {
+   "model": "crmroute-ci",
+   "agent_strategy": "remote",
+   "org_type": "b2c",
+   "interactive": false,
+   "agent_eval_mode": "aided",
+   "llm_provider": "bedrock",
+   "privacy_aware_prompt": false,
+   "judge_model": "openai/gpt-oss-120b",
+   "judge_provider": "groq",
+   "user_model": "gemini/gemini-3.1-flash-lite",
+   "user_provider": "gemini",
+   "max_turns": 20,
+   "max_user_turns": 10,
+   "remote_app": "app",
+   "tasks_sha256": "e5e3e12a36a8f0ecb5e9cac4dfdb8c00d0f794c693756ac4b9cefbd65ce6ff14",
+   "generation": {
+    "CRMARENA_THINKING_LEVEL": "low",
+    "CRMARENA_MAX_TOKENS": "8192",
+    "CRMARENA_OLLAMA_NUM_CTX": "16384",
+    "CRMARENA_MAX_REQUEST_TOKENS": "250000",
+    "GOOGLE_CLOUD_PROJECT": "",
+    "GOOGLE_CLOUD_LOCATION": ""
+   }
+  },
+  "b2c|True": {
+   "model": "crmroute-ci",
+   "agent_strategy": "remote",
+   "org_type": "b2c",
+   "interactive": true,
+   "agent_eval_mode": "aided",
+   "llm_provider": "bedrock",
+   "privacy_aware_prompt": false,
+   "judge_model": "openai/gpt-oss-120b",
+   "judge_provider": "groq",
+   "user_model": "gemini/gemini-3.1-flash-lite",
+   "user_provider": "gemini",
+   "max_turns": 20,
+   "max_user_turns": 6,
+   "remote_app": "app",
+   "tasks_sha256": "6f1888c5b5adb39150821dd4766f31c3df4c72ad9380dfa85d35f4bef05c4d92",
+   "generation": {
+    "CRMARENA_THINKING_LEVEL": "low",
+    "CRMARENA_MAX_TOKENS": "8192",
+    "CRMARENA_OLLAMA_NUM_CTX": "16384",
+    "CRMARENA_MAX_REQUEST_TOKENS": "250000",
+    "GOOGLE_CLOUD_PROJECT": "",
+    "GOOGLE_CLOUD_LOCATION": ""
+   }
+  }
+ },
+ "success_rate": 0.5833333333333334,
+ "refusal_rate": 1.0
+}
