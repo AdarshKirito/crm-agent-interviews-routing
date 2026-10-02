@@ -102,7 +102,9 @@ def classify(err: Exception) -> str:
             "timeout", "internalservererror", "connection refused",
             # transient network failures (DNS, dropped connections) on the way to the same model
             "connecterror", "name resolution", "getaddrinfo", "connection reset", "remoteprotocolerror",
-            "server disconnected", "cannot connect to host")):
+            "server disconnected", "cannot connect to host",
+            # the same failures while refreshing a Vertex access token (google-auth over requests)
+            "transporterror", "nameresolutionerror", "failed to resolve", "name or service not known")):
         return "unavailable"
     return "other"
 

@@ -53,6 +53,12 @@ def test_classify_vertex_and_network_errors():
                 httpx.RemoteProtocolError("Server disconnected without sending a response."),
                 httpx.ReadError("[Errno 104] Connection reset by peer")):
         assert classify(err) == "unavailable", err
+    # dev b2c/1076: DNS failed while google-auth refreshed the Vertex token, and the turn returned HTTP 500
+    from google.auth.exceptions import TransportError
+    assert classify(TransportError(
+        "HTTPSConnectionPool(host='oauth2.googleapis.com', port=443): Max retries exceeded with url: /token "
+        "(Caused by NameResolutionError(\"HTTPSConnection(host='oauth2.googleapis.com', port=443): Failed to "
+        "resolve 'oauth2.googleapis.com' ([Errno -2] Name or service not known)\"))")) == "unavailable"
 
 
 def test_retry_after_parsing():
