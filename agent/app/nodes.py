@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from . import state_keys as K
 from .checker import check_answer, has_refusal_wording
-from .config import MAX_CHECKER_RETRIES, MAX_CLARIFYING_QUESTIONS, MODE, PROMPT_GUARD_THRESHOLD, ROUTER_MIN_CONFIDENCE
+from .config import MAX_CHECKER_RETRIES, MAX_CLARIFYING_QUESTIONS, MODE, PROMPT_GUARD_MODEL, PROMPT_GUARD_THRESHOLD, ROUTER_MIN_CONFIDENCE
 from .guard import pii
 from .guard.pii import analyze_request, scrub
 from .guard.prompt_guard import injection_score
@@ -74,11 +74,27 @@ async def screen(ctx):
     all_text = "\n".join(turns)
     context = state.get(K.TASK_CONTEXT) or ""
     prediction = await asyncio.to_thread(get_router().predict, f"{all_text}\n{context}".strip())
+
+    def record_guard_usage(raw):
+        from .usage import add_usage
+
+        usage = None
+        if isinstance(raw, dict) and raw.get("prompt_tokens") is not None and raw.get("completion_tokens") is not None:
+            thoughts = (raw.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
+            usage = types.GenerateContentResponseUsageMetadata(
+                prompt_token_count=raw["prompt_tokens"],
+                cached_content_token_count=(raw.get("prompt_tokens_details") or {}).get("cached_tokens") or 0,
+                candidates_token_count=max(raw["completion_tokens"] - thoughts, 0),
+                thoughts_token_count=thoughts,
+            )
+        add_usage(state, f"groq/{PROMPT_GUARD_MODEL}", "prompt_guard", usage,
+                  {"session_id": getattr(getattr(ctx, "session", None), "id", None)})
+
     signals: dict[str, Any] = {
         "nearest_type": prediction.task_type,
         "nearest_confidence": round(prediction.confidence, 3),
         "nearest_top": [[t, round(c, 3)] for t, c in prediction.top],
-        "prompt_guard": await injection_score(turns[-1] if turns else ""),
+        "prompt_guard": await injection_score(turns[-1] if turns else "", on_usage=record_guard_usage),
     }
     if signals["prompt_guard"] is not None and signals["prompt_guard"] >= PROMPT_GUARD_THRESHOLD:
         yield Event(state={K.SCREEN: signals, K.GUARD: {"decision": "refuse", "category": "prompt_injection", "source": "prompt_guard"}},
@@ -122,6 +138,7 @@ def make_policy_check(llm, model_name: str, max_tokens: int = 2048):
         async for response in llm.generate_content_async(request, stream=False):
             last = response
         meta = dict((last.custom_metadata if last else None) or {})
+        meta["session_id"] = getattr(getattr(ctx, "session", None), "id", None)
         add_usage(ctx.state, meta.get("answered_by") or model_name, "policy_check", last.usage_metadata if last else None, meta)
         text = "".join(p.text or "" for p in ((last.content.parts if last and last.content else None) or []) if not p.thought)
         start, end = text.rfind("{"), text.rfind("}")

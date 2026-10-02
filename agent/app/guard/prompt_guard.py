@@ -6,6 +6,7 @@ score wins. Without GROQ_API_KEY the check is skipped and reported as unavailabl
 
 import logging
 import re
+from collections.abc import Callable
 
 import httpx
 
@@ -39,7 +40,13 @@ def parse_score(content: str) -> float | None:
     return None
 
 
-async def injection_score(text: str, timeout: float = 10.0) -> float | None:
+async def injection_score(text: str, timeout: float = 10.0, *,
+                          on_usage: Callable[[dict | None], None] | None = None) -> float | None:
+    """Report usage for each attempted chunk without logging the request text.
+
+    Missing metadata (including a failed request) is reported as None so callers
+    can mark accounting incomplete rather than treating the request as free.
+    """
     if not GROQ_API_KEY or not text.strip():
         return None
     best: float | None = None
@@ -52,9 +59,20 @@ async def injection_score(text: str, timeout: float = 10.0) -> float | None:
                     json={"model": PROMPT_GUARD_MODEL, "messages": [{"role": "user", "content": chunk}]},
                 )
                 res.raise_for_status()
-                score = parse_score(res.json()["choices"][0]["message"]["content"])
+                payload = res.json()
             except (httpx.HTTPError, KeyError, IndexError, ValueError) as err:
+                if on_usage:
+                    on_usage(None)
                 logger.warning("prompt guard unavailable: %s", err)
+                return best
+            reported = payload.get("usage") if isinstance(payload, dict) else None
+            if on_usage:
+                on_usage(reported if isinstance(reported, dict) else None)
+            try:
+                content = payload["choices"][0]["message"]["content"]
+                score = parse_score(content) if isinstance(content, str) else None
+            except (KeyError, IndexError, TypeError):
+                logger.warning("prompt guard returned an invalid response shape")
                 return best
             if score is not None:
                 best = score if best is None else max(best, score)
