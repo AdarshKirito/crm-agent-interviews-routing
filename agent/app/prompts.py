@@ -47,7 +47,8 @@ def solver_instruction(ctx: ReadonlyContext) -> str:
     parts = []
 
     if customer:
-        me = ", ".join(sorted(self_ids_from_context(state.get(K.TASK_CONTEXT) or ""))) or "unknown"
+        own = set(state.get(K.SELF_IDS) or []) | self_ids_from_context(state.get(K.TASK_CONTEXT) or "")
+        me = ", ".join(sorted(i for i in own if i.startswith("003"))) or "unknown"
         parts.append(
             "You are the customer-support agent of this company, talking to a logged-in customer "
             f"(their contact Id: {me}). Help with their own records and with public product and service "
@@ -102,9 +103,11 @@ def solver_instruction(ctx: ReadonlyContext) -> str:
             "## Talking with the user\n"
             f"The user may not say everything at once. This kind of task needs: {need}. If a needed detail is "
             "missing, set kind=clarify and ask ONE short question that names exactly what is missing (you have "
-            f"asked {asked} so far). Which record the user means (a lead, case, opportunity, quote or product Id) "
-            "and which time period they mean can only come from the user: ask right away instead of searching for "
-            "candidates. Do not ask about facts you can look up once you know the record.\n"
+            f"asked {asked} so far). What the request is about (the lead, case, opportunity, quote or product, or "
+            "the region for a routing request) can only come from the user: ask right away instead of searching for "
+            "candidates. A relative period ('the last five quarters') needs today's date; if the conversation has "
+            "not given it, ask for it. If the user says they do not have a detail, do not ask for it again: work "
+            "with what they gave. Do not ask about facts you can look up once you know the record.\n"
         )
     else:
         parts.append("## Answer now\nDo not ask questions. If something is ambiguous, choose the most reasonable reading and answer.\n")
@@ -138,6 +141,9 @@ def policy_instruction(ctx: ReadonlyContext) -> str:
     screen = state.get(K.SCREEN) or {}
     turns = [t["text"] for t in state.get(K.CONVERSATION) or [] if t["role"] == "user"]
     context = (state.get(K.TASK_CONTEXT) or "").strip()
+    stated = screen.get("self_id_stated") or next((i for i in state.get(K.SELF_IDS) or [] if i.startswith("003")), None)
+    if not context and stated:
+        context = f"Contact Id interacting: {stated} (stated by the customer in this conversation)"
     return (
         f"{_policy_text()}\n\n## Session\n"
         f"Logged-in customer context: {context or '(none given)'}\n\n"

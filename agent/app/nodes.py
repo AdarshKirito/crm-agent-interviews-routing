@@ -105,16 +105,26 @@ async def screen(ctx):
         return
     entities = await asyncio.to_thread(analyze_request, all_text)
     self_ids = current_self_ids(state)
+    bound: dict[str, Any] = {}
+    if not self_ids:
+        # Multi-turn tasks give no logged-in identity: the customer states their Contact Id. The
+        # first one they give is bound as theirs for the session (a deployment would take it from
+        # authentication); every other person's Id is still refused below.
+        stated = [i for turn in turns for i in ids_in(turn) if i.startswith("003")]
+        if stated:
+            self_ids = {stated[0]}
+            bound = {K.SELF_IDS: [stated[0]]}
+            signals["self_id_stated"] = stated[0]
     other_ids = [i for i in ids_in(all_text) if i.startswith(PERSON_ID_PREFIXES) and not in_ids(i, self_ids)]
     signals["pii"] = [f"{e['type']}:{e['text']}" for e in entities if e["type"] != "SALESFORCE_ID"]
     signals["pii_engine"] = pii.ENGINE
     signals["terms"] = load_map().request_signals(all_text)
     signals["other_customer_ids"] = other_ids
     if other_ids:
-        yield Event(state={K.SCREEN: signals, K.GUARD: {"decision": "refuse", "category": "private_customer_information",
-                                                         "source": "id_check"}}, route="refuse")
+        yield Event(state={K.SCREEN: signals, **bound, K.GUARD: {"decision": "refuse", "category": "private_customer_information",
+                                                                  "source": "id_check"}}, route="refuse")
         return
-    yield Event(state={K.SCREEN: signals}, route="classify")
+    yield Event(state={K.SCREEN: signals, **bound}, route="classify")
 
 
 def make_policy_check(llm, model_name: str, max_tokens: int = 2048):

@@ -93,7 +93,7 @@ SPECS: dict[str, TaskSpec] = {
     ),
     "lead_routing": TaskSpec(
         "id", "the User Id of the agent a new lead should be assigned to under the lead routing policy",
-        ("the lead",),
+        ("the lead's region (state)",),
         ("Match the lead's region to Territory2 descriptions, then apply the policy's tie-breakers.",),
     ),
     "sales_cycle_understanding": TaskSpec(
