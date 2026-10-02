@@ -7,6 +7,7 @@ the two rankings with RRF, a FastEmbed cross-encoder reranks the fused pool, and
 results are collapsed to one hit per article (its best chunk).
 """
 import asyncio
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -48,6 +49,7 @@ class HybridSettings(BaseSettings):
     collection_prefix: str = Field(default="knowledge_", validation_alias="HYBRID_COLLECTION_PREFIX")
     default_org: str = Field(default="b2b", validation_alias="CRM_DEFAULT_ORG")
     max_article_chars: int = Field(default=3500, validation_alias="HYBRID_MAX_ARTICLE_CHARS")
+    max_response_chars: int = Field(default=16000, ge=256, validation_alias="HYBRID_MAX_RESPONSE_CHARS")
     # Chosen on the dev retrieval set (scripts/eval_retrieval.py); see README "Knowledge search".
     search_mode: str = Field(default="sparse", validation_alias="HYBRID_SEARCH_MODE")
 
@@ -110,11 +112,16 @@ class HybridKnowledgeIndex:
         return self._reranker
 
     def collection_for(self, org: str | None) -> str:
-        return f"{self.settings.collection_prefix}{(org or self.settings.default_org).lower()}"
+        selected = (self.settings.default_org if org is None else org).strip().lower()
+        if selected not in {"b2b", "b2c", "original"}:
+            raise ValueError("Unknown org; use b2b, b2c or original.")
+        return f"{self.settings.collection_prefix}{selected}"
 
     async def build(self, collection: str, articles: list[dict]) -> int:
         """(Re)create `collection` from exported Knowledge__kav rows. Point ids are
         derived from article id + chunk number, so rebuilding is deterministic."""
+        if not articles:
+            raise ValueError("Cannot rebuild a knowledge collection from an empty article export.")
         texts, payloads, ids = [], [], []
         for article in articles:
             for n, chunk in enumerate(article_chunks(article, self.settings.chunk_words, self.settings.chunk_overlap)):
@@ -157,19 +164,24 @@ class HybridKnowledgeIndex:
             await self.client.upsert(collection_name=collection, points=points[start : start + 256])
         return len(points)
 
-    async def _embed_query(self, query: str):
+    async def _embed_query(self, query: str, mode: SearchMode):
         loop = asyncio.get_running_loop()
-        dense = await loop.run_in_executor(None, lambda: next(iter(self.dense.query_embed([query]))))
-        sparse = await loop.run_in_executor(None, lambda: next(iter(self.sparse.query_embed([query]))))
-        return dense.tolist(), models.SparseVector(indices=sparse.indices.tolist(), values=sparse.values.tolist())
+        dense_query = sparse_query = None
+        if mode != "sparse":
+            dense = await loop.run_in_executor(None, lambda: next(iter(self.dense.query_embed([query]))))
+            dense_query = dense.tolist()
+        if mode != "dense":
+            sparse = await loop.run_in_executor(None, lambda: next(iter(self.sparse.query_embed([query]))))
+            sparse_query = models.SparseVector(indices=sparse.indices.tolist(), values=sparse.values.tolist())
+        return dense_query, sparse_query
 
     async def search(self, collection: str, query: str, top_k: int = 5, mode: SearchMode | None = None) -> list[Hit]:
         mode = mode or self.settings.search_mode
         if mode not in SEARCH_MODES:
             raise ValueError(f"mode must be one of {SEARCH_MODES}")
         if not await self.client.collection_exists(collection):
-            return []
-        dense, sparse = await self._embed_query(query)
+            raise ValueError(f"Knowledge collection {collection!r} is missing; build the org's knowledge index first.")
+        dense, sparse = await self._embed_query(query, mode)
         n = self.settings.candidates
         if mode == "dense":
             res = await self.client.query_points(collection, query=dense, using=DENSE, limit=n, with_payload=True)
@@ -208,12 +220,33 @@ class HybridKnowledgeIndex:
 
     def to_result(self, hit: Hit) -> dict:
         body = hit.payload.get("body") or ""
-        if len(body) > self.settings.max_article_chars:
-            body = body[: self.settings.max_article_chars] + " ..."
+        truncated = len(body) > self.settings.max_article_chars
+        if truncated:
+            body = body[: self.settings.max_article_chars]
         return {
             "Id": hit.article_id,
             "Title": hit.title,
             "Summary": hit.payload.get("summary"),
             "FAQ_Answer__c": body,
+            "truncated": truncated,
+            # The highest-scoring passage may be beyond the body prefix.
+            "matched_passage": hit.chunk,
             "score": round(hit.score, 4),
         }
+
+    def to_response(self, hits: list[Hit]) -> dict:
+        """Keep complete article results within the serialized response budget."""
+        articles = [self.to_result(hit) for hit in hits]
+        response = {"returned": len(articles), "articles": articles}
+        if len(json.dumps(response)) <= self.settings.max_response_chars:
+            return response
+        for count in range(len(articles) - 1, -1, -1):
+            response = {
+                "returned": count,
+                "articles": articles[:count],
+                "truncated": True,
+                "note": f"Only {count} of {len(hits)} matched articles fit in one response. Refine the search to retrieve more specific evidence.",
+            }
+            if len(json.dumps(response)) <= self.settings.max_response_chars:
+                return response
+        raise ValueError("Knowledge response budget is too small for truncation metadata.")

@@ -185,9 +185,7 @@ class QdrantMCPServer(FastMCP):
             collection = self.hybrid_index.collection_for(org)
             hits = await self.hybrid_index.search(collection, query, top_k=top_k)
             await ctx.debug(f"search_knowledge {collection}: {len(hits)} hits")
-            return json.dumps(
-                {"returned": len(hits), "articles": [self.hybrid_index.to_result(h) for h in hits]}
-            )
+            return json.dumps(self.hybrid_index.to_response(hits))
 
         if self.hybrid_settings.enabled:
             self.tool(

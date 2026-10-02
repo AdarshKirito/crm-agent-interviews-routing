@@ -14,7 +14,15 @@ class FastEmbedProvider(EmbeddingProvider):
 
     def __init__(self, model_name: str):
         self.model_name = model_name
-        self.embedding_model = TextEmbedding(model_name)
+        self._embedding_model: TextEmbedding | None = None
+
+    @property
+    def embedding_model(self) -> TextEmbedding:
+        # HYBRID_ONLY deployments never use the upstream memory tools. Keep
+        # their dense model unloaded unless those tools are actually called.
+        if self._embedding_model is None:
+            self._embedding_model = TextEmbedding(self.model_name)
+        return self._embedding_model
 
     async def embed_documents(self, documents: list[str]) -> list[list[float]]:
         """Embed a list of documents into vectors."""
