@@ -1,6 +1,9 @@
-# Scoping doc (fill in after the three interviews)
+# Scoping doc
 
-One page. Everything below in *italics* is a prompt to replace.
+> **Status: not conducted.** No stakeholder interviews have been held. Everything below
+> is the unfilled template; the rows in *italics* are examples, not findings.
+
+One page. Fill it in after the three interviews; everything in *italics* is a prompt to replace.
 
 ## Who I talked to
 | # | Role | Team | Date | Uses the CRM for |

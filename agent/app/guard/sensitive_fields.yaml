@@ -1,7 +1,7 @@
 # Sensitive-data map for customer-facing sessions (audience = customer).
-# STARTER VERSION: built from the CRMArena-Pro schema and the dev split. Replace or
-# extend it with the never-share list from the stakeholder interviews
-# (Object.Field -> class). Classes:
+# STARTER VERSION: built from the CRMArena-Pro schema and the dev split, not from
+# stakeholder input (the interviews have not been conducted). Replace or extend it
+# with the never-share list from those interviews (Object.Field -> class). Classes:
 #   pii          personal data about a person
 #   internal_ops internal operational / sales data
 #   confidential confidential company knowledge
