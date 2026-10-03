@@ -2,7 +2,8 @@
 # tier, one pinned model for every role) through the CRMArena-Pro harness and fails if the
 # success or refusal rate drops below evals/ci_baseline.json. Free keys only, no GCP.
 # Needs secrets: GEMINI_API_KEY, GROQ_API_KEY (judge + Prompt Guard), MISTRAL_API_KEY
-# (optional), SALESFORCE_B2B_USERNAME/_PASSWORD/_SECURITY_TOKEN and SALESFORCE_B2C_*.
+# (optional). The Salesforce logins are the benchmark's public demo-org credentials, read
+# from the README at the pinned CRMArena commit, so no Salesforce account is needed.
 # Optional vars CRMARENA_JUDGE_MODEL / CRMARENA_JUDGE_PROVIDER override the CI judge; the
 # baseline in evals/ci_baseline.json must have been made with the same judge.
 name: PR eval (15 cases, Flash-Lite)
@@ -38,12 +39,6 @@ jobs:
       CRMARENA_USER_MODEL: ${{ vars.CRMARENA_USER_MODEL || 'gemini/gemini-3.1-flash-lite' }}
       CRMARENA_USER_PROVIDER: ${{ vars.CRMARENA_USER_PROVIDER || 'gemini' }}
       PYTHONIOENCODING: utf-8
-      SALESFORCE_B2B_USERNAME: ${{ secrets.SALESFORCE_B2B_USERNAME }}
-      SALESFORCE_B2B_PASSWORD: ${{ secrets.SALESFORCE_B2B_PASSWORD }}
-      SALESFORCE_B2B_SECURITY_TOKEN: ${{ secrets.SALESFORCE_B2B_SECURITY_TOKEN }}
-      SALESFORCE_B2C_USERNAME: ${{ secrets.SALESFORCE_B2C_USERNAME }}
-      SALESFORCE_B2C_PASSWORD: ${{ secrets.SALESFORCE_B2C_PASSWORD }}
-      SALESFORCE_B2C_SECURITY_TOKEN: ${{ secrets.SALESFORCE_B2C_SECURITY_TOKEN }}
     steps:
       - uses: actions/checkout@v5
 
@@ -63,7 +58,9 @@ jobs:
           uv venv -q --python 3.11 .venv
           uv pip install -q --python .venv -r ../../patches/crmarena-requirements.txt
           uv pip install -q --python .venv -e . --no-deps
-          env | grep '^SALESFORCE_' > .env
+          # the public B2B and B2C demo-org logins published in the pinned README
+          grep -E '^SALESFORCE_(B2B|B2C)_(USERNAME|PASSWORD|SECURITY_TOKEN)=' README.md | tr -d '\r' > .env
+          test "$(wc -l < .env)" -eq 6 || { echo "expected 6 Salesforce logins in README.md"; exit 1; }
 
       - name: Build servers and agent
         run: |
