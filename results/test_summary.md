@@ -78,3 +78,17 @@ Paired differences vs `react` (same task ids; win claimed only if the CI exclude
 | routed | $5.42 | 0 | 0 | 71/152 (47%) |
 
 Judge and simulated user: local `ollama_chat/qwen3:8b`, $0 in API charges. The task redone after an error (react_privacy b2c/63, multi-turn) hit an IndexError in the benchmark's own grader (`parse_answers` on an empty judge extraction); the resume re-ran it and the failed attempt is kept in its record.
+
+## Judge check
+
+40 test items, drawn blind across the four systems (react 10, react_privacy 10, full 8, routed 12; 9
+multi-turn, 6 refusal cases), labelled by hand against the reference answer in `evals/human_labels_test.csv`.
+
+```
+python scripts/judge_agreement.py kappa --labels evals/human_labels_test.csv
+labelled rows: 40  raw agreement: 0.975  Cohen's kappa: 0.949  (target >= 0.7)
+  disagreement: ('react_privacy', 'b2b|True|1112', 'best_region_identification', 1, 0)
+```
+
+The one disagreement is a multi-turn answer that ranks two states and concludes with the reference (TX);
+the judge scored it 0. The record does not keep the judge's extraction, so the cause is not confirmed.
