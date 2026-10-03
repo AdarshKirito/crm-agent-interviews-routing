@@ -59,8 +59,8 @@ What this shows:
   in success (paired differences +1.8 and -2.6 points, both intervals spanning zero).
 - **Cost:** the test run cost $42.65 at list price ($14.52, $14.12, $8.59 and $5.42 for systems 1-4), and the
   whole project about $71 including dev tuning, the final dev run and a ReAct cost probe.
-- **Judge check:** 40 blind test items across the four systems, labelled by hand against the reference
-  answer (`evals/human_labels_test.csv`). The qwen3:8b judge agreed on 39 of 40, Cohen's κ = 0.95 (target
+- **Judge check:** 40 blind test items across the four systems, labelled with AI assistance and every row
+  reviewed by me against the reference answer (`evals/human_labels_test.csv`). The qwen3:8b judge agreed on 39 of 40, Cohen's κ = 0.95 (target
   ≥ 0.7). The one disagreement is a multi-turn answer that ranks two states before concluding with the right
   one; the grader extracts every state a reply names, so it scored the answer wrong.
 
@@ -303,7 +303,7 @@ Local only: `./scripts/dev_up.sh` or the Docker image. The project runs against 
 
 ## Limitations
 
-- **Judge and simulated user.** Both are local qwen3:8b for every system, not the paper's GPT-4o, so the numbers are comparable across the four systems here but not with the paper's tables. The 8B simulated user sometimes misplays its role (it asks the agent for the Id it should give, or repeats a question until the turn limit), which adds noise to multi-turn results. The hand-labelled check of the judge (κ = 0.95, 39 of 40 agree) covers only 40 items: it rules out a badly miscalibrated judge, not occasional errors.
+- **Judge and simulated user.** Both are local qwen3:8b for every system, not the paper's GPT-4o, so the numbers are comparable across the four systems here but not with the paper's tables. The 8B simulated user sometimes misplays its role (it asks the agent for the Id it should give, or repeats a question until the turn limit), which adds noise to multi-turn results. The judge check (κ = 0.95, 39 of 40 agree) covers only 40 items, and its labels were AI-assisted with every row reviewed by me: it rules out a badly miscalibrated judge, not occasional errors or blind spots the drafting model shares with the judge.
 - **Sample sizes.** With n=114 business tasks the 95% margin is about ±9 points, with n=38 multi-turn about ±16, and with 42 refusal cases about ±15. A difference is reported as a win only when its paired bootstrap interval excludes zero.
 - **Dev tuning.** The per-task hints encode the benchmark's answer-key conventions, learned on dev tasks and checked against the orgs (`results/dev_tuning.md`). They transfer to test because test uses the same orgs and task generators; they would need re-checking on another org.
 - **Routing fit.** About 11 dev tasks per type per model; the table is noisy by construction.

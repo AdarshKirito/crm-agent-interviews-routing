@@ -82,7 +82,8 @@ Judge and simulated user: local `ollama_chat/qwen3:8b`, $0 in API charges. The t
 ## Judge check
 
 40 test items, drawn blind across the four systems (react 10, react_privacy 10, full 8, routed 12; 9
-multi-turn, 6 refusal cases), labelled by hand against the reference answer in `evals/human_labels_test.csv`.
+multi-turn, 6 refusal cases), labelled with AI assistance and every row reviewed by hand against the reference
+answer, in `evals/human_labels_test.csv`.
 
 ```
 python scripts/judge_agreement.py kappa --labels evals/human_labels_test.csv
