@@ -91,4 +91,7 @@ labelled rows: 40  raw agreement: 0.975  Cohen's kappa: 0.949  (target >= 0.7)
 ```
 
 The one disagreement is a multi-turn answer that ranks two states and concludes with the reference (TX);
-the judge scored it 0. The record does not keep the judge's extraction, so the cause is not confirmed.
+the human label counts it correct. The grader scored it 0: its state-extraction prompt
+(CRMArena's `crm_sandbox/env/env.py`) collects every state a reply names, so it parsed `["AZ", "TX"]` (the record's
+`agent_info.end_reason.parsed_answer`) against the reference `["TX"]`. That rule costs a reply that names a
+runner-up more than a terse one; a single item does not show how often it happens.

@@ -62,7 +62,7 @@ What this shows:
 - **Judge check:** 40 blind test items across the four systems, labelled by hand against the reference
   answer (`evals/human_labels_test.csv`). The qwen3:8b judge agreed on 39 of 40, Cohen's κ = 0.95 (target
   ≥ 0.7). The one disagreement is a multi-turn answer that ranks two states before concluding with the right
-  one; the judge scored it wrong.
+  one; the grader extracts every state a reply names, so it scored the answer wrong.
 
 ## Dev: tuning and the routing fit
 
