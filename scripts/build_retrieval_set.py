@@ -8,7 +8,7 @@ Gold labels:
 - knowledge_qa (only with --include-silver): the answer is free text, so the gold article is a *silver* label: the
   article whose text contains the largest share of the reference answer's content
   words, kept only when that share is >= --min-support and clearly beats the runner-up.
-  The query is the task question. A manual check of 6 such labels found none whose
+  The query is the task question. A check of 6 such labels found none whose
   article actually contained the answer, so they are excluded by default.
 
 Usage:  python scripts/build_retrieval_set.py --env vendor/CRMArena/.env --exclude data/test.json
@@ -55,7 +55,7 @@ def main():
     ap.add_argument("--out", default="data/retrieval/dev.jsonl")
     ap.add_argument("--min-support", type=float, default=0.6)
     ap.add_argument("--include-silver", action="store_true",
-                    help="also write knowledge_qa rows with silver labels (off: a manual check found them unreliable)")
+                    help="also write knowledge_qa rows with silver labels (off: a check found them unreliable)")
     args = ap.parse_args()
     load_dotenv(args.env)
     test = json.loads(Path(args.exclude).read_text())
