@@ -40,7 +40,7 @@ b2b|True|1112,react_privacy,best_region_identification,I'm trying to find out wh
    - **Case:** 00001027
    - **Resolution Time:** ~1 hour, 2 minutes, and 22 seconds (Created: 2022-07-26 12:38:00 UTC, Closed: 2022-07-26 13:40:22 UTC)
 
-Therefore, **Texas (TX)** had the quickest case closure.",1,"Correct: wordy, but it clearly concludes TX, matching the reference. Its window (Jun 22 to Jul 27, 2022) matches the task's 5 weeks back from 2022-07-27."
+Therefore, **Texas (TX)** had the quickest case closure.",1,"Correct on substance: it concludes TX, matching the reference, and its window (Jun 22 to Jul 27, 2022) is exactly 5 weeks back from the task date 2022-07-27. Caveat: it also names AZ as runner-up instead of returning only the state code, so the benchmark's auto-scorer (which extracts every state in the final reply) would likely mark it wrong."
 b2c|False|1526,react,case_routing,"Use the case routing policy to determine the most suitable agent for the given case. Return only the Id of the agent.
 ## Given Case
 - Case Subject: Scheduled Test Drive Vehicle Unavailability
